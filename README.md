@@ -128,7 +128,91 @@ Displays statistics about registered migrations and their execution status. It a
 ./bin/migrate stats
 ```
 
-## Recommendations & hints  
+## Testing
+
+This section explains how to run all tests from the command line without needing to SSH into Docker containers.
+
+### Prerequisites
+
+Before running tests, you need to have the required database services running. You can use the provided docker-compose.yaml to start them:
+
+```bash
+# Start all database services
+docker-compose up mongo mysql postgres -d
+
+# Or start individual services
+docker-compose up mongo -d     # For MongoDB tests
+docker-compose up mysql -d     # For MySQL tests  
+docker-compose up postgres -d  # For PostgreSQL tests
+```
+
+### Running Tests by Build Tag
+
+The project has tests with different build tags that require specific database connections:
+
+#### MongoDB Tests
+
+```bash
+# Run MongoDB tests
+go test -tags mongo -v ./execution/repository/
+
+# With custom environment variables
+$env:MONGO_DSN="mongodb://localhost:27017"; $env:MONGO_DATABASE="migrations"; go test -tags mongo -v ./execution/repository/
+```
+
+**Environment Variables:**
+- `MONGO_DSN`: MongoDB connection string (default: `mongodb://localhost:27017`)
+- `MONGO_DATABASE`: Database name (default: `migrations`)
+
+#### MySQL Tests
+
+```bash
+# Run MySQL tests
+go test -tags mysql -v ./execution/repository/
+
+# With custom environment variables
+$env:MYSQL_DSN="root:123456789@tcp(localhost:3306)/migrations"; $env:MYSQL_DATABASE="migrations"; go test -tags mysql -v ./execution/repository/
+```
+
+**Environment Variables:**
+- `MYSQL_DSN`: MySQL connection string (default: `root:123456789@tcp(localhost:3306)/migrations`)
+- `MYSQL_DATABASE`: Database name (default: `migrations`)
+
+#### PostgreSQL Tests
+
+```bash
+# Run PostgreSQL tests
+go test -tags postgres -v ./execution/repository/
+
+# With custom environment variables
+$env:POSTGRES_DSN="postgres://postgres:123456789@localhost:5432/migrations?sslmode=disable"; $env:POSTGRES_DATABASE="migrations"; go test -tags postgres -v ./execution/repository/
+```
+
+**Environment Variables:**
+- `POSTGRES_DSN`: PostgreSQL connection string (default: `postgres://postgres:123456789@localhost:5432/migrations?sslmode=disable`)
+- `POSTGRES_DATABASE`: Database name (default: `migrations`)
+
+### Running All Tests Together
+
+To run all tests (with and without build tags) in one command:
+
+```bash
+# Start all database services first
+docker-compose up mongo mysql postgres -d
+
+# Run all tests with all build tags
+go test -tags "mongo mysql postgres" -v ./...
+```
+
+### Important Notes
+
+1. **Database Services**: Make sure the required database services are running before executing tests with build tags
+2. **Test Isolation**: Each test suite creates and drops its own test database to ensure isolation
+3. **Default Credentials**: The default connection strings use simple credentials suitable for development/testing
+4. **Build Tags**: Tests with build tags (`mongo`, `mysql`, `postgres`) will only run when the corresponding tag is specified
+5. **Environment Variables**: You can override default connection settings using environment variables
+
+## Recommendations & hints
 
 No database locking is done while persisting migration execution changes in the repository.
 This is due to the fact that, in distributed systems, it's hard to manage cluster level
