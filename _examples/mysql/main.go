@@ -110,6 +110,7 @@ func buildRegistry(
 		panic(fmt.Errorf("failed to connect to migrations db: %w", err))
 	}
 
+	// OPTION 1: Manual registration (original approach)
 	// It's not necessary to add them in order, the tool will handle ordering based on
 	// their version number
 	allMigrations := []migration.Migration{
@@ -119,4 +120,30 @@ func buildRegistry(
 	}
 
 	return migration.NewDirMigrationsRegistry(dirPath, allMigrations)
+
+	// OPTION 2: Auto-discovery (new approach) - uncomment to use
+	// Using auto-discovery - no need to manually register each migration!
+	// Just provide a dependency provider function and one example from the migrations package
+	/*
+	return migration.NewAutoDiscoveryDirMigrationsRegistry(
+		dirPath,
+		func(migrationType reflect.Type) []reflect.Value {
+			// Provide dependencies based on what each migration type needs
+			dependencies := []reflect.Value{reflect.ValueOf(db)}
+			
+			// Some migrations might need additional dependencies like context
+			// Check if the migration has a Ctx field
+			for i := 0; i < migrationType.NumField(); i++ {
+				field := migrationType.Field(i)
+				if field.Name == "Ctx" && field.Type.String() == "context.Context" {
+					dependencies = append(dependencies, reflect.ValueOf(ctx))
+					break
+				}
+			}
+			
+			return dependencies
+		},
+		&migrations.Migration1712953077{}, // Example to tell the system which package to scan
+	)
+	*/
 }

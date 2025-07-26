@@ -34,6 +34,173 @@ use, in the _examples directory**.
 **Build tags** for storage integrations: **mysql** (works with mariadb also), **mongo**, 
 **postgres** (more will be added)
 
+## Auto-Discovery Feature
+
+**NEW**: Go Migrations now supports **reflection-based auto-discovery** to automatically find and register migrations, eliminating the need for manual registration!
+
+### The Problem with Manual Registration
+
+Previously, developers had to manually register each migration in their code:
+
+```go
+// Old way - manual registration (tedious and error-prone)
+allMigrations := []migration.Migration{
+    &migrations.Migration1712953077{Db: db},
+    &migrations.Migration1712953080{Db: db},
+    &migrations.Migration1712953083{Db: db, Ctx: ctx},
+}
+registry := migration.NewDirMigrationsRegistry(dirPath, allMigrations)
+```
+
+This approach has several issues:
+- **Error-prone**: Easy to forget to register new migrations
+- **Boilerplate**: Repetitive code for each migration
+- **Maintenance**: Must update registration code every time you add a migration
+
+### The Auto-Discovery Solution
+
+With auto-discovery, the system automatically finds all migration types and handles registration:
+
+```go
+// New way - auto-discovery (simple and automatic!)
+registry := migration.NewAutoDiscoveryDirMigrationsRegistry(
+    dirPath,
+    func(migrationType reflect.Type) []reflect.Value {
+        // Provide dependencies based on what each migration needs
+        dependencies := []reflect.Value{reflect.ValueOf(db)}
+        
+        // Check if migration needs additional dependencies like context
+        for i := 0; i < migrationType.NumField(); i++ {
+            field := migrationType.Field(i)
+            if field.Name == "Ctx" && field.Type.String() == "context.Context" {
+                dependencies = append(dependencies, reflect.ValueOf(ctx))
+                break
+            }
+        }
+        
+        return dependencies
+    },
+    &migrations.Migration1712953077{}, // Just one example to tell system which package to scan
+)
+```
+
+### How Auto-Discovery Works
+
+1. **Reflection-based scanning**: Uses Go's reflection to find all types implementing the `Migration` interface
+2. **Automatic dependency injection**: Analyzes struct fields and provides appropriate dependencies
+3. **Type-safe discovery**: Ensures only valid migration types are registered
+4. **Package-based scanning**: Discovers all migrations in the specified packages
+
+### Usage Examples
+
+#### Basic Auto-Discovery
+
+```go
+import (
+    "reflect"
+    "github.com/golibry/go-migrations/migration"
+)
+
+// Simple auto-discovery with basic dependency injection
+registry := migration.NewAutoDiscoveryDirMigrationsRegistry(
+    dirPath,
+    func(migrationType reflect.Type) []reflect.Value {
+        return []reflect.Value{reflect.ValueOf(database)}
+    },
+    &migrations.Migration1712953077{}, // Example from package to scan
+)
+```
+
+#### Advanced Auto-Discovery with Conditional Dependencies
+
+```go
+registry := migration.NewAutoDiscoveryDirMigrationsRegistry(
+    dirPath,
+    func(migrationType reflect.Type) []reflect.Value {
+        dependencies := []reflect.Value{reflect.ValueOf(db)}
+        
+        // Add context for migrations that need it
+        if hasField(migrationType, "Ctx", "context.Context") {
+            dependencies = append(dependencies, reflect.ValueOf(ctx))
+        }
+        
+        // Add logger for migrations that need it
+        if hasField(migrationType, "Logger", "*log.Logger") {
+            dependencies = append(dependencies, reflect.ValueOf(logger))
+        }
+        
+        return dependencies
+    },
+    &migrations.Migration1712953077{},
+)
+
+func hasField(t reflect.Type, fieldName, fieldType string) bool {
+    for i := 0; i < t.NumField(); i++ {
+        field := t.Field(i)
+        if field.Name == fieldName && field.Type.String() == fieldType {
+            return true
+        }
+    }
+    return false
+}
+```
+
+#### Using the Lower-Level API
+
+For more control, you can use the lower-level auto-discovery API:
+
+```go
+config := &migration.AutoDiscoveryConfig{
+    PackageTypes: []interface{}{
+        &migrations.Migration1712953077{},
+        &migrations.Migration1712953080{},
+    },
+    DependencyProvider: func(migrationType reflect.Type) []reflect.Value {
+        // Custom dependency injection logic
+        return []reflect.Value{reflect.ValueOf(db), reflect.ValueOf(ctx)}
+    },
+}
+
+discoveredMigrations := migration.DiscoverMigrations(config)
+registry := migration.NewDirMigrationsRegistry(dirPath, discoveredMigrations)
+```
+
+### Benefits of Auto-Discovery
+
+✅ **Eliminates manual registration** - No need to update registration code for each new migration  
+✅ **Automatic dependency injection** - System analyzes struct fields and provides dependencies  
+✅ **Type-safe discovery** - Uses reflection to ensure only valid migrations are found  
+✅ **Reduces boilerplate** - Less repetitive code in your migration setup  
+✅ **Prevents human error** - No risk of forgetting to register new migrations  
+✅ **Easy maintenance** - Just create migration structs, registration is automatic  
+
+### Migration Structure Requirements
+
+For auto-discovery to work, your migrations must follow these patterns:
+
+```go
+// Migration struct with dependencies as fields
+type Migration1712953077 struct {
+    Db  *sql.DB           // Database connection
+    Ctx context.Context   // Context (optional)
+}
+
+// Must implement Migration interface
+func (m *Migration1712953077) Version() uint64 { return 1712953077 }
+func (m *Migration1712953077) Up() error { /* migration logic */ }
+func (m *Migration1712953077) Down() error { /* rollback logic */ }
+```
+
+### Running the Example
+
+See the complete working example in `_examples/auto-discovery/main.go`:
+
+```bash
+go run _examples/auto-discovery/main.go
+```
+
+This example demonstrates both manual registration and auto-discovery side by side, showing the benefits of the new approach.
+
 ## CLI Usage Examples
 
 The Go Migrations tool provides a command-line interface with several commands to manage your database migrations. Here's a detailed guide on how to use each command:

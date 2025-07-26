@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -205,4 +206,176 @@ func (registry *DirMigrationsRegistry) AssertValidRegistry() {
 			),
 		)
 	}
+}
+
+// DependencyProvider is a function type that provides dependencies for migration instantiation.
+// It receives the migration type and returns a slice of values to be used as constructor arguments.
+type DependencyProvider func(migrationType reflect.Type) []reflect.Value
+
+// AutoDiscoveryConfig holds configuration for auto-discovery of migrations.
+type AutoDiscoveryConfig struct {
+	// PackageTypes is a slice of example instances from the package to scan.
+	// The reflection system will use these to determine which package to scan.
+	PackageTypes []interface{}
+
+	// DependencyProvider provides dependencies for migration instantiation.
+	DependencyProvider DependencyProvider
+}
+
+// NewDirMigrationsRegistryWithAutoDiscovery creates a new DirMigrationsRegistry
+// using reflection-based auto-discovery to find and register all migrations
+// in the specified packages.
+//
+// This function scans the provided packages for types that implement the Migration
+// interface and automatically instantiates and registers them using the provided
+// dependency injection system.
+//
+// Parameters:
+//   - dirPath: The directory path where migration files are located
+//   - config: Configuration for auto-discovery including package types and dependency provider
+//
+// Returns:
+//   - *DirMigrationsRegistry: A registry with all discovered migrations registered
+//
+// Example usage:
+//
+//	config := &AutoDiscoveryConfig{
+//	    PackageTypes: []interface{}{&migrations.Migration1712953077{}},
+//	    DependencyProvider: func(migrationType reflect.Type) []reflect.Value {
+//	        // Return appropriate dependencies based on migration type
+//	        return []reflect.Value{reflect.ValueOf(db), reflect.ValueOf(ctx)}
+//	    },
+//	}
+//	registry := NewDirMigrationsRegistryWithAutoDiscovery(dirPath, config)
+func NewDirMigrationsRegistryWithAutoDiscovery(
+	dirPath MigrationsDirPath,
+	config *AutoDiscoveryConfig,
+) *DirMigrationsRegistry {
+	discoveredMigrations := DiscoverMigrations(config)
+	return NewDirMigrationsRegistry(dirPath, discoveredMigrations)
+}
+
+// NewAutoDiscoveryDirMigrationsRegistry creates a new DirMigrationsRegistry with
+// a simplified auto-discovery API that automatically finds all migration types
+// by scanning the provided package examples.
+//
+// This is a convenience function that makes it easier to use auto-discovery
+// without manually configuring all the details.
+//
+// Parameters:
+//   - dirPath: The directory path where migration files are located
+//   - dependencyProvider: Function that provides dependencies for migration instantiation
+//   - packageExamples: Example instances from packages to scan (e.g., &migrations.Migration1712953077{})
+//
+// Returns:
+//   - *DirMigrationsRegistry: A registry with all discovered migrations registered
+//
+// Example usage:
+//
+//	registry := NewAutoDiscoveryDirMigrationsRegistry(
+//	    dirPath,
+//	    func(migrationType reflect.Type) []reflect.Value {
+//	        return []reflect.Value{reflect.ValueOf(db), reflect.ValueOf(ctx)}
+//	    },
+//	    &migrations.Migration1712953077{}, // This tells the system to scan the migrations package
+//	)
+func NewAutoDiscoveryDirMigrationsRegistry(
+	dirPath MigrationsDirPath,
+	dependencyProvider DependencyProvider,
+	packageExamples ...interface{},
+) *DirMigrationsRegistry {
+	config := &AutoDiscoveryConfig{
+		PackageTypes:       packageExamples,
+		DependencyProvider: dependencyProvider,
+	}
+	return NewDirMigrationsRegistryWithAutoDiscovery(dirPath, config)
+}
+
+// DiscoverMigrations uses reflection to find all types that implement the Migration
+// interface in the specified packages and instantiates them using the dependency provider.
+// This function is exported to allow for more flexible usage of the auto-discovery system.
+func DiscoverMigrations(config *AutoDiscoveryConfig) []Migration {
+	var migrations []Migration
+	migrationInterface := reflect.TypeOf((*Migration)(nil)).Elem()
+
+	// Get unique packages from the provided package types
+	packages := make(map[string]bool)
+	for _, pkgType := range config.PackageTypes {
+		pkgPath := reflect.TypeOf(pkgType).Elem().PkgPath()
+		packages[pkgPath] = true
+	}
+
+	// For each package, scan for migration types
+	for _, pkgType := range config.PackageTypes {
+		pkgValue := reflect.ValueOf(pkgType)
+		if pkgValue.Kind() == reflect.Ptr {
+			pkgValue = pkgValue.Elem()
+		}
+
+		pkgTypeInfo := pkgValue.Type()
+
+		// Check if this type implements Migration interface
+		if reflect.PtrTo(pkgTypeInfo).Implements(migrationInterface) {
+			// Get dependencies from the provider
+			dependencies := config.DependencyProvider(pkgTypeInfo)
+
+			// Create new instance of the migration type
+			migrationPtr := reflect.New(pkgTypeInfo)
+			migrationValue := migrationPtr.Elem()
+
+			// Set field values using provided dependencies
+			if err := setMigrationFields(migrationValue, dependencies); err != nil {
+				panic(
+					fmt.Errorf(
+						"failed to set dependencies for migration %s: %w",
+						pkgTypeInfo.Name(), err,
+					),
+				)
+			}
+
+			// Convert to Migration interface
+			migration := migrationPtr.Interface().(Migration)
+			migrations = append(migrations, migration)
+		}
+	}
+
+	return migrations
+}
+
+// setMigrationFields sets the fields of a migration struct using the provided dependencies.
+// It matches dependencies to struct fields based on type compatibility.
+func setMigrationFields(migrationValue reflect.Value, dependencies []reflect.Value) error {
+	migrationStruct := migrationValue.Type()
+
+	// Create a map of dependency types to values for an easy lookup
+	depMap := make(map[reflect.Type]reflect.Value)
+	for _, dep := range dependencies {
+		depMap[dep.Type()] = dep
+	}
+
+	// Set each field in the migration struct
+	for i := 0; i < migrationStruct.NumField(); i++ {
+		field := migrationStruct.Field(i)
+		fieldValue := migrationValue.Field(i)
+
+		// Skip unexported fields
+		if !fieldValue.CanSet() {
+			continue
+		}
+
+		// Find matching dependency by type
+		if dep, exists := depMap[field.Type]; exists {
+			fieldValue.Set(dep)
+		} else {
+			// Try to find compatible interface types
+			for depType, depValue := range depMap {
+				if depType.AssignableTo(field.Type) {
+					fieldValue.Set(depValue)
+					break
+				}
+			}
+		}
+	}
+
+	return nil
 }
