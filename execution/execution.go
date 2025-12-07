@@ -116,6 +116,9 @@ type InMemoryRepository struct {
 	// InitErr is returned by the Init method if set
 	InitErr error
 
+	// SaveErr is returned by the Save method if set
+	SaveErr error
+
 	// LoadErr is returned by the LoadExecutions method if set
 	LoadErr error
 
@@ -144,6 +147,10 @@ func (repo *InMemoryRepository) LoadExecutions() ([]MigrationExecution, error) {
 // Save implements the Repository.Save method.
 // It upserts the execution to the PersistedExecutions slice.
 func (repo *InMemoryRepository) Save(execution MigrationExecution) error {
+	if repo.SaveErr != nil {
+		return repo.SaveErr
+	}
+	
 	for i, e := range repo.PersistedExecutions {
 		if e.Version == execution.Version {
 			repo.PersistedExecutions[i] = execution

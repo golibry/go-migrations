@@ -2,12 +2,13 @@ package handler
 
 import (
 	"errors"
-	"github.com/golibry/go-migrations/execution"
-	"github.com/golibry/go-migrations/migration"
-	"github.com/stretchr/testify/suite"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/golibry/go-migrations/execution"
+	"github.com/golibry/go-migrations/migration"
+	"github.com/stretchr/testify/suite"
 )
 
 type HandlerTestSuite struct {
@@ -603,14 +604,17 @@ func (suite *HandlerTestSuite) TestItCanMigrateUp() {
 			"failed scenario: %s", name,
 		)
 
-		var savedExecutions []uint64
-		for _, saved := range repo.PersistedExecutions[len(scenario.initialExecutions):] {
-			savedExecutions = append(savedExecutions, saved.Version)
-		}
-		suite.Assert().Equal(
-			scenario.expectedVersions, savedExecutions,
-			"failed scenario: %s", name,
-		)
+  // Validate that repository contains finished executions for all expected versions,
+  // without assuming they were appended (repository uses upsert by version).
+  versionsMap := map[uint64]execution.MigrationExecution{}
+  for _, e := range repo.PersistedExecutions {
+      versionsMap[e.Version] = e
+  }
+  for _, v := range scenario.expectedVersions {
+      saved, ok := versionsMap[v]
+      suite.Assert().True(ok, "failed scenario: %s", name)
+      suite.Assert().True(saved.Finished(), "failed scenario: %s", name)
+  }
 	}
 }
 

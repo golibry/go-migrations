@@ -4,26 +4,26 @@ package repository
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
+	"github.com/golibry/go-migrations/execution"
 	"github.com/stretchr/testify/suite"
+	mongodbtc "github.com/testcontainers/testcontainers-go/modules/mongodb"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const MongoDnsEnv = "MONGO_DSN"
-const MongoDbNameEnv = "MONGO_DATABASE"
 const MongoCollectionName = "migration_executions"
 
 type MongoTestSuite struct {
 	suite.Suite
-	dbName  string
-	dsn     string
-	client  *mongo.Client
-	handler *MongoHandler
+	dbName    string
+	dsn       string
+	client    *mongo.Client
+	handler   *MongoHandler
+	container *mongodbtc.MongoDBContainer
 }
 
 func TestMongoTestSuite(t *testing.T) {
@@ -31,36 +31,44 @@ func TestMongoTestSuite(t *testing.T) {
 }
 
 func (suite *MongoTestSuite) SetupSuite() {
-	suite.dbName = os.Getenv(MongoDbNameEnv)
-	suite.dsn = os.Getenv(MongoDnsEnv)
+	// Start a MongoDB testcontainer
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
 
-	if suite.dbName == "" {
-		// Needed if tests are ran on the host not docker
-		suite.dbName = "migrations"
-	}
+	// Use a stable image; tests do not need auth
+	mongoC, err := mongodbtc.Run(
+		ctx,
+		"mongo:8.2",
+	)
+	suite.Require().NoError(err)
+	suite.container = mongoC
 
-	if suite.dsn == "" {
-		// Needed if tests are ran on the host not docker
-		suite.dsn = "mongodb://localhost:27017"
-	}
+	dsn, err := mongoC.ConnectionString(ctx)
+	suite.Require().NoError(err)
+	suite.dsn = dsn
+	suite.dbName = "migrations"
 
 	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
 	opts := options.Client().ApplyURI(suite.dsn).SetServerAPIOptions(serverAPI)
 	opts.SetMaxPoolSize(1)
 	opts.SetMaxConnIdleTime(3 * time.Second)
-	opts.SetConnectTimeout(3 * time.Second)
-	opts.SetServerSelectionTimeout(3 * time.Second)
-	opts.SetTimeout(5 * time.Second)
-	opts.SetSocketTimeout(5 * time.Second)
-	client, _ := mongo.Connect(context.Background(), opts)
+	opts.SetConnectTimeout(10 * time.Second)
+	opts.SetServerSelectionTimeout(20 * time.Second)
+	opts.SetTimeout(20 * time.Second)
+	opts.SetSocketTimeout(20 * time.Second)
+	client, err := mongo.Connect(context.Background(), opts)
+	suite.Require().NoError(err)
 
 	suite.handler = &MongoHandler{client, suite.dbName, MongoCollectionName, context.Background()}
 	suite.client = suite.handler.client
-	_ = suite.handler.Init()
+	suite.Require().NoError(suite.handler.Init())
 }
 
 func (suite *MongoTestSuite) TearDownSuite() {
-	_ = suite.client.Database(suite.dbName).Drop(context.Background())
+	_ = suite.client.Disconnect(context.Background())
+	if suite.container != nil {
+		_ = suite.container.Terminate(context.Background())
+	}
 }
 
 func (suite *MongoTestSuite) SetupTest() {
@@ -86,8 +94,16 @@ func (suite *MongoTestSuite) TestItCanInitializeTheRepository() {
 	suite.Assert().Contains(names, MongoCollectionName)
 }
 
+func mongoExecutionsProvider() map[uint64]execution.MigrationExecution {
+	return map[uint64]execution.MigrationExecution{
+		uint64(1): {Version: 1, ExecutedAtMs: 2, FinishedAtMs: 3},
+		uint64(4): {Version: 4, ExecutedAtMs: 5, FinishedAtMs: 6},
+		uint64(7): {Version: 7, ExecutedAtMs: 8, FinishedAtMs: 9},
+	}
+}
+
 func (suite *MongoTestSuite) TestItCanLoadAllExecutions() {
-	executions := executionsProvider()
+	executions := mongoExecutionsProvider()
 
 	for _, exec := range executions {
 		_, _ = suite.client.Database(suite.dbName).Collection(MongoCollectionName).InsertOne(
@@ -108,7 +124,7 @@ func (suite *MongoTestSuite) TestItCanLoadAllExecutions() {
 
 func (suite *MongoTestSuite) TestItCanSaveExecutions() {
 	// Insert
-	executions := executionsProvider()
+	executions := mongoExecutionsProvider()
 
 	for _, exec := range executions {
 		err := suite.handler.Save(exec)
@@ -138,7 +154,7 @@ func (suite *MongoTestSuite) TestItCanSaveExecutions() {
 }
 
 func (suite *MongoTestSuite) TestItCanRemoveExecution() {
-	executions := executionsProvider()
+	executions := mongoExecutionsProvider()
 
 	for _, exec := range executions {
 		_ = suite.handler.Save(exec)
@@ -152,7 +168,7 @@ func (suite *MongoTestSuite) TestItCanRemoveExecution() {
 }
 
 func (suite *MongoTestSuite) TestItCanFindOne() {
-	executions := executionsProvider()
+	executions := mongoExecutionsProvider()
 
 	for _, exec := range executions {
 		_ = suite.handler.Save(exec)

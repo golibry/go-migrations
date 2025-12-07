@@ -3,61 +3,81 @@
 package repository
 
 import (
-	"context"
-	"database/sql"
-	"os"
-	"strconv"
-	"strings"
-	"testing"
+    "context"
+    "database/sql"
+    "strconv"
+    "testing"
+    "time"
 
-	_ "github.com/go-sql-driver/mysql"
-	"github.com/golibry/go-migrations/execution"
-	"github.com/golibry/go-migrations/migration"
-	"github.com/stretchr/testify/suite"
+    _ "github.com/go-sql-driver/mysql"
+    "github.com/golibry/go-migrations/execution"
+    "github.com/golibry/go-migrations/migration"
+    "github.com/stretchr/testify/suite"
+    mysqltc "github.com/testcontainers/testcontainers-go/modules/mysql"
 )
 
-const DnsEnv = "MYSQL_DSN"
-const DbNameEnv = "MYSQL_DATABASE"
 const ExecutionsTable = "migration_executions"
 
 type MysqlTestSuite struct {
-	suite.Suite
-	dbName  string
-	dsn     string
-	db      *sql.DB
-	handler *MysqlHandler
+    suite.Suite
+    dbName    string
+    dsn       string
+    db        *sql.DB
+    handler   *MysqlHandler
+    container *mysqltc.MySQLContainer
 }
 
 func TestMysqlTestSuite(t *testing.T) {
-	suite.Run(t, new(MysqlTestSuite))
+    suite.Run(t, new(MysqlTestSuite))
 }
 
 func (suite *MysqlTestSuite) SetupSuite() {
-	suite.dbName = os.Getenv(DbNameEnv)
-	suite.dsn = os.Getenv(DnsEnv)
+    // Start a MySQL testcontainer
+    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+    defer cancel()
 
-	if suite.dbName == "" {
-		// Needed if tests are ran on the host not docker
-		suite.dbName = "migrations"
-	}
+    mysqlC, err := mysqltc.Run(
+        ctx,
+        "mysql:8.0",
+        mysqltc.WithDatabase("migrations"),
+        mysqltc.WithUsername("root"),
+        mysqltc.WithPassword("password"),
+    )
+    suite.Require().NoError(err)
+    suite.container = mysqlC
 
-	if suite.dsn == "" {
-		// Needed if tests are ran on the host not docker
-		suite.dsn = "root:123456789@tcp(localhost:3306)/" + suite.dbName
-	}
+    connStr, err := mysqlC.ConnectionString(ctx)
+    suite.Require().NoError(err)
+    suite.dsn = connStr
+    suite.dbName = "migrations"
 
-	tmpDb, _ := sql.Open("mysql", strings.TrimRight(suite.dsn, suite.dbName))
-	_, _ = tmpDb.Exec("DROP DATABASE IF EXISTS " + suite.dbName)
-	_, _ = tmpDb.Exec("CREATE DATABASE " + suite.dbName)
-	_ = tmpDb.Close()
+    suite.handler, err = NewMysqlHandler(suite.dsn, ExecutionsTable, context.Background(), nil)
+    suite.Require().NoError(err)
+    suite.db = suite.handler.db
 
-	suite.handler, _ = NewMysqlHandler(suite.dsn, ExecutionsTable, context.Background(), nil)
-	suite.db = suite.handler.db
+    // Wait for the database to become ready (max 20s)
+    deadline := time.Now().Add(20 * time.Second)
+    var pingErr error
+    for {
+        ctxPing, cancelPing := context.WithTimeout(context.Background(), 1*time.Second)
+        pingErr = suite.db.PingContext(ctxPing)
+        cancelPing()
+        if pingErr == nil {
+            break
+        }
+        if time.Now().After(deadline) {
+            break
+        }
+        time.Sleep(500 * time.Millisecond)
+    }
+    suite.Require().NoError(pingErr)
 }
 
 func (suite *MysqlTestSuite) TearDownSuite() {
-	_, _ = suite.db.Exec("DROP DATABASE IF EXISTS " + suite.dbName)
-	_ = suite.db.Close()
+    _ = suite.db.Close()
+    if suite.container != nil {
+        _ = suite.container.Terminate(context.Background())
+    }
 }
 
 func (suite *MysqlTestSuite) SetupTest() {

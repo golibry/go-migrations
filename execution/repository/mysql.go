@@ -18,20 +18,6 @@ type MysqlHandler struct {
 	ctx       context.Context
 }
 
-func newDbHandle(dsn, driverName string) (*sql.DB, error) {
-	db, err := sql.Open(driverName, dsn)
-
-	if db == nil {
-		return nil, err
-	}
-
-	db.SetMaxIdleConns(1)
-	db.SetMaxOpenConns(1)
-	db.SetConnMaxIdleTime(0)
-	db.SetConnMaxLifetime(0)
-	return db, err
-}
-
 // NewMysqlHandler Builds a new MysqlHandler. If db is nil, it will try to build a db handle
 // from the provided dsn. It's preferable to not share the db handle used by the handler with
 // the one you pass in your migrations (this way, db sessions will not be mixed)

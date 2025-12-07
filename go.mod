@@ -8,6 +8,10 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/stretchr/testify v1.11.1
 	go.mongodb.org/mongo-driver v1.17.6
+	github.com/testcontainers/testcontainers-go v0.33.0
+	github.com/testcontainers/testcontainers-go/modules/mongodb v0.33.0
+	github.com/testcontainers/testcontainers-go/modules/postgres v0.33.0
+	github.com/testcontainers/testcontainers-go/modules/mysql v0.33.0
 )
 
 require (

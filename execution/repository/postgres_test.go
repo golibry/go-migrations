@@ -5,27 +5,25 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"os"
-	_ "strconv"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/golibry/go-migrations/execution"
 	"github.com/golibry/go-migrations/migration"
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/suite"
+	pgcontainer "github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
-const PostgresDsnEnv = "POSTGRES_DSN"
-const PostgresDbNameEnv = "POSTGRES_DATABASE"
 const PostgresExecutionsTable = "migration_executions"
 
 type PostgresTestSuite struct {
 	suite.Suite
-	dbName  string
-	dsn     string
-	db      *sql.DB
-	handler *PostgresHandler
+	dbName    string
+	dsn       string
+	db        *sql.DB
+	handler   *PostgresHandler
+	container *pgcontainer.PostgresContainer
 }
 
 func TestPostgresTestSuite(t *testing.T) {
@@ -33,44 +31,58 @@ func TestPostgresTestSuite(t *testing.T) {
 }
 
 func (suite *PostgresTestSuite) SetupSuite() {
-	suite.dbName = os.Getenv(PostgresDbNameEnv)
-	suite.dsn = os.Getenv(PostgresDsnEnv)
+	// Start a Postgres testcontainer
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
 
-	if suite.dbName == "" {
-		// Needed if tests are ran on the host not docker
-		suite.dbName = "migrations"
-	}
-
-	if suite.dsn == "" {
-		// Needed if tests are ran on the host not docker
-		suite.dsn = "postgres://postgres:123456789@localhost:5432/" + suite.dbName + "?sslmode=disable"
-	}
-
-	// Connect to postgres without database to create test database
-	tmpDsn := strings.Replace(suite.dsn, "/"+suite.dbName, "/postgres", 1)
-	tmpDb, _ := sql.Open("postgres", tmpDsn)
-	_, _ = tmpDb.Exec("DROP DATABASE IF EXISTS " + suite.dbName)
-	_, _ = tmpDb.Exec("CREATE DATABASE " + suite.dbName)
-	_ = tmpDb.Close()
-
-	suite.handler, _ = NewPostgresHandler(
-		suite.dsn,
-		PostgresExecutionsTable,
-		context.Background(),
-		nil,
+	pgC, err := pgcontainer.Run(
+		ctx,
+		"postgres:16",
+		pgcontainer.WithDatabase("migrations"),
+		pgcontainer.WithUsername("postgres"),
+		pgcontainer.WithPassword("postgres"),
 	)
-	suite.db = suite.handler.db
+	suite.Require().NoError(err)
+	suite.container = pgC
+
+	connStr, err := pgC.ConnectionString(ctx, "sslmode=disable")
+	suite.Require().NoError(err)
+	suite.dsn = connStr
+	suite.dbName = "migrations"
+
+    suite.handler, err = NewPostgresHandler(
+        suite.dsn,
+        PostgresExecutionsTable,
+        context.Background(),
+        nil,
+    )
+    suite.Require().NoError(err)
+    suite.db = suite.handler.db
+
+    // Wait for the database to become ready (max 20s)
+    deadline := time.Now().Add(20 * time.Second)
+    var pingErr error
+    for {
+        // Use a short per-ping timeout
+        ctxPing, cancelPing := context.WithTimeout(context.Background(), 1*time.Second)
+        pingErr = suite.db.PingContext(ctxPing)
+        cancelPing()
+        if pingErr == nil {
+            break
+        }
+        if time.Now().After(deadline) {
+            break
+        }
+        time.Sleep(500 * time.Millisecond)
+    }
+    suite.Require().NoError(pingErr)
 }
 
 func (suite *PostgresTestSuite) TearDownSuite() {
-	// Close the connection before dropping the database
 	_ = suite.db.Close()
-
-	// Connect to postgres without database to drop test database
-	tmpDsn := strings.Replace(suite.dsn, "/"+suite.dbName, "/postgres", 1)
-	tmpDb, _ := sql.Open("postgres", tmpDsn)
-	// _, _ = tmpDb.Exec("DROP DATABASE IF EXISTS " + suite.dbName)
-	_ = tmpDb.Close()
+	if suite.container != nil {
+		_ = suite.container.Terminate(context.Background())
+	}
 }
 
 func (suite *PostgresTestSuite) SetupTest() {
@@ -107,11 +119,11 @@ func (suite *PostgresTestSuite) TestItCanInitializeExecutionsTable() {
 		var exists bool
 		_ = suite.db.QueryRow(
 			`
-			SELECT EXISTS (
-				SELECT FROM pg_tables 
-				WHERE schemaname = 'public' 
-				AND tablename = $1
-			)`, PostgresExecutionsTable,
+            SELECT EXISTS (
+                SELECT FROM pg_tables 
+                WHERE schemaname = 'public' 
+                AND tablename = $1
+            )`, PostgresExecutionsTable,
 		).Scan(&exists)
 		return exists
 	}
@@ -121,8 +133,16 @@ func (suite *PostgresTestSuite) TestItCanInitializeExecutionsTable() {
 	suite.Assert().True(tableExists())
 }
 
+func postgresExecutionsProvider() map[uint64]execution.MigrationExecution {
+	return map[uint64]execution.MigrationExecution{
+		uint64(1): {Version: 1, ExecutedAtMs: 2, FinishedAtMs: 3},
+		uint64(4): {Version: 4, ExecutedAtMs: 5, FinishedAtMs: 6},
+		uint64(7): {Version: 7, ExecutedAtMs: 8, FinishedAtMs: 9},
+	}
+}
+
 func (suite *PostgresTestSuite) TestItCanLoadExecutions() {
-	executions := executionsProvider()
+	executions := postgresExecutionsProvider()
 
 	for _, exec := range executions {
 		_, _ = suite.db.Exec(
@@ -143,7 +163,7 @@ func (suite *PostgresTestSuite) TestItCanLoadExecutions() {
 }
 
 func (suite *PostgresTestSuite) TestItFailsToExecuteAnyChangesWhenMissingTable() {
-	_, _ = suite.db.Exec(`DROP TABLE IF EXISTS "` + ExecutionsTable + `"`)
+	_, _ = suite.db.Exec(`DROP TABLE IF EXISTS "` + PostgresExecutionsTable + `"`)
 	migrationExecution := execution.StartExecution(migration.NewDummyMigration(123))
 	_, errLoad := suite.handler.LoadExecutions()
 	errSave := suite.handler.Save(*migrationExecution)
@@ -151,23 +171,23 @@ func (suite *PostgresTestSuite) TestItFailsToExecuteAnyChangesWhenMissingTable()
 	_, errFindOne := suite.handler.FindOne(uint64(123))
 
 	suite.Assert().Error(errLoad)
-	suite.Assert().ErrorContains(errLoad, ExecutionsTable)
+	suite.Assert().ErrorContains(errLoad, PostgresExecutionsTable)
 	suite.Assert().Error(errSave)
-	suite.Assert().ErrorContains(errSave, ExecutionsTable)
+	suite.Assert().ErrorContains(errSave, PostgresExecutionsTable)
 	suite.Assert().Error(errRemove)
-	suite.Assert().ErrorContains(errRemove, ExecutionsTable)
+	suite.Assert().ErrorContains(errRemove, PostgresExecutionsTable)
 	suite.Assert().Error(errFindOne)
-	suite.Assert().ErrorContains(errFindOne, ExecutionsTable)
+	suite.Assert().ErrorContains(errFindOne, PostgresExecutionsTable)
 }
 
 func (suite *PostgresTestSuite) TestItFailsToLoadExecutionsFromInvalidRepoData() {
 	_, _ = suite.db.Exec(
-		`ALTER TABLE "` + ExecutionsTable + `" 
-		 ALTER COLUMN finished_at_ms DROP NOT NULL`,
+		`ALTER TABLE "` + PostgresExecutionsTable + `" 
+         ALTER COLUMN finished_at_ms DROP NOT NULL`,
 	)
 	_, _ = suite.db.Exec(
-		`INSERT INTO "` + ExecutionsTable + `" 
-		 VALUES (1, 2, 1), (3, 4, NULL)`,
+		`INSERT INTO "` + PostgresExecutionsTable + `" 
+         VALUES (1, 2, 1), (3, 4, NULL)`,
 	)
 	execs, err := suite.handler.LoadExecutions()
 	suite.Assert().Len(execs, 1)
@@ -177,7 +197,7 @@ func (suite *PostgresTestSuite) TestItFailsToLoadExecutionsFromInvalidRepoData()
 
 func (suite *PostgresTestSuite) TestItCanSaveExecutions() {
 	// Insert
-	executions := executionsProvider()
+	executions := postgresExecutionsProvider()
 
 	for _, exec := range executions {
 		err := suite.handler.Save(exec)
@@ -207,7 +227,7 @@ func (suite *PostgresTestSuite) TestItCanSaveExecutions() {
 }
 
 func (suite *PostgresTestSuite) TestItCanRemoveExecution() {
-	executions := executionsProvider()
+	executions := postgresExecutionsProvider()
 
 	for _, exec := range executions {
 		_ = suite.handler.Save(exec)
@@ -221,7 +241,7 @@ func (suite *PostgresTestSuite) TestItCanRemoveExecution() {
 }
 
 func (suite *PostgresTestSuite) TestItCanFindOne() {
-	executions := executionsProvider()
+	executions := postgresExecutionsProvider()
 
 	for _, exec := range executions {
 		_, _ = suite.db.Exec(
@@ -234,7 +254,7 @@ func (suite *PostgresTestSuite) TestItCanFindOne() {
 	foundExec, err := suite.handler.FindOne(uint64(4))
 	suite.Assert().Equal(&execToFind, foundExec)
 	suite.Assert().Nil(err)
-	_, _ = suite.db.Exec(`DELETE FROM "` + ExecutionsTable + `"`)
+	_, _ = suite.db.Exec(`DELETE FROM "` + PostgresExecutionsTable + `"`)
 	foundExec, err = suite.handler.FindOne(uint64(4))
 	suite.Assert().Nil(foundExec)
 	suite.Assert().Nil(err)
