@@ -104,8 +104,9 @@ func (h *MongoHandler) Init() error {
 									{Key: "bsonType", Value: "long"},
 									{Key: "minimum", Value: 0},
 									{
-										Key:   "description",
-										Value: "_id (executed version) must be greater than 0",
+										Key: "description",
+										Value: "_id (executed version) must be greater or equal" +
+											" to 0",
 									},
 								},
 							},
@@ -113,14 +114,20 @@ func (h *MongoHandler) Init() error {
 								Key: "executedAtMs", Value: bson.D{
 									{Key: "bsonType", Value: "long"},
 									{Key: "minimum", Value: 0},
-									{Key: "description", Value: "executed at must be greater than 0"},
+									{
+										Key:   "description",
+										Value: "executed at must be greater or equal to 0",
+									},
 								},
 							},
 							{
 								Key: "finishedAtMs", Value: bson.D{
 									{Key: "bsonType", Value: "long"},
 									{Key: "minimum", Value: 0},
-									{Key: "description", Value: "finished at must be greater than 0"},
+									{
+										Key:   "description",
+										Value: "finished at must be greater or equal to 0",
+									},
 								},
 							},
 						},

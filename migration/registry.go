@@ -130,8 +130,8 @@ func NewDirMigrationsRegistry(
 
 // HasAllMigrationsRegistered checks if everything from the migrations directory has been
 // registered in the registry.
-// If it returns false, next 2 return values show which file names are missing and which
-// file names are extra, compare to the registered migrations.
+// If it returns false, the next 2 return values show which file names are missing and which
+// file names are extra, compared to the registered migrations.
 // Errors if reading the directory fails (maybe insufficient permissions?)
 func (registry *DirMigrationsRegistry) HasAllMigrationsRegistered() (
 	bool, []string, []string, error,
@@ -155,8 +155,8 @@ func (registry *DirMigrationsRegistry) HasAllMigrationsRegistered() (
 			continue
 		}
 
-		fname := strings.TrimLeft(item.Name(), FileNamePrefix+FileNameSeparator)
-		version, err := strconv.Atoi(strings.TrimRight(fname, ".go"))
+		fname := strings.TrimPrefix(item.Name(), FileNamePrefix+FileNameSeparator)
+		version, err := strconv.Atoi(strings.TrimSuffix(fname, ".go"))
 
 		if err != nil {
 			continue
@@ -206,4 +206,3 @@ func (registry *DirMigrationsRegistry) AssertValidRegistry() {
 		)
 	}
 }
-

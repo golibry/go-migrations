@@ -73,7 +73,7 @@ func (h *MysqlHandler) Init() error {
 func (h *MysqlHandler) LoadExecutions() (executions []execution.MigrationExecution, err error) {
 	rows, err := h.db.QueryContext(
 		h.ctx,
-		"SELECT SQL_NO_CACHE * FROM `"+h.tableName+"`",
+		"SELECT version, executed_at_ms, finished_at_ms FROM `"+h.tableName+"`",
 	)
 
 	if err != nil {
@@ -121,7 +121,7 @@ func (h *MysqlHandler) Remove(execution execution.MigrationExecution) error {
 func (h *MysqlHandler) FindOne(version uint64) (*execution.MigrationExecution, error) {
 	row := h.db.QueryRowContext(
 		h.ctx,
-		"SELECT SQL_NO_CACHE * FROM `"+h.tableName+"` WHERE `version` = ?",
+		"SELECT version, executed_at_ms, finished_at_ms FROM `"+h.tableName+"` WHERE `version` = ?",
 		version,
 	)
 

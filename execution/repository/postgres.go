@@ -115,7 +115,10 @@ func (h *PostgresHandler) Remove(execution execution.MigrationExecution) error {
 }
 
 func (h *PostgresHandler) FindOne(version uint64) (*execution.MigrationExecution, error) {
-	query := fmt.Sprintf(`SELECT * FROM "%s" WHERE version = $1`, h.tableName)
+	query := fmt.Sprintf(
+		`SELECT version, executed_at_ms, finished_at_ms FROM "%s" WHERE version = $1`,
+		h.tableName,
+	)
 	row := h.db.QueryRowContext(h.ctx, query, version)
 
 	if row == nil {

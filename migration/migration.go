@@ -167,7 +167,7 @@ func GenerateBlankMigration(dirPath MigrationsDirPath) (fileName string, err err
 	fileName = FileNamePrefix + FileNameSeparator + strconv.Itoa(int(tmplData.Version)) + ".go"
 	filePath := filepath.Join(string(dirPath), fileName)
 
-	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0644)
 
 	if err != nil {
 		return "", fmt.Errorf(

@@ -10,13 +10,14 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"io"
+	"strconv"
+	"strings"
+
 	"github.com/golibry/go-cli-command/cli"
 	"github.com/golibry/go-migrations/execution"
 	"github.com/golibry/go-migrations/handler"
 	"github.com/golibry/go-migrations/migration"
-	"io"
-	"strconv"
-	"strings"
 )
 
 const MigrationsCmdLockName = "app-go-migrations"
@@ -63,10 +64,10 @@ func Bootstrap(
 	repository execution.Repository,
 	dirPath migration.MigrationsDirPath,
 	newHandler func(
-		registry migration.MigrationsRegistry,
-		repository execution.Repository,
-		newExecutionPlan handler.ExecutionPlanBuilder,
-	) (*handler.MigrationsHandler, error),
+	registry migration.MigrationsRegistry,
+	repository execution.Repository,
+	newExecutionPlan handler.ExecutionPlanBuilder,
+) (*handler.MigrationsHandler, error),
 	outputWriter io.Writer,
 	processExit func(code int),
 	settings *BootstrapSettings,
@@ -80,8 +81,8 @@ func Bootstrap(
 	if err != nil {
 		panic(
 			fmt.Errorf(
-				"coult not bootstrap cli, %s: %w",
-				"failed to create new migrations migrationsHandler with error", err,
+				"could not bootstrap cli, %s: %w",
+				"failed to create new migrationsHandler with error", err,
 			),
 		)
 	}
