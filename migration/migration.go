@@ -9,6 +9,7 @@
 package migration
 
 import (
+	"context"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -44,13 +45,13 @@ type Migration interface {
 	// Up() act as a unit, but, care should be taken when coordinating them (use save points
 	// for example, and save them in a central place which can be used as a persistent
 	// source of truth).
-	Up() error
+	Up(ctx context.Context, db any) error
 
 	// Down must include all necessary code that will roll back the changes made by the Up()
 	// function. Care should be taken when designing your rollback strategy, to not lose any
 	// critical database state. Other things mentioned for Up() function are valid for Down()
 	// also.
-	Down() error
+	Down(ctx context.Context, db any) error
 }
 
 // DummyMigration is a simple implementation of the Migration interface
@@ -79,11 +80,11 @@ func (dm *DummyMigration) Version() uint64 {
 
 // Up is a no-op implementation of the Migration.Up() method.
 // It always returns nil (no error).
-func (dm *DummyMigration) Up() error { return nil }
+func (dm *DummyMigration) Up(ctx context.Context, db any) error { return nil }
 
 // Down is a no-op implementation of the Migration.Down() method.
 // It always returns nil (no error).
-func (dm *DummyMigration) Down() error { return nil }
+func (dm *DummyMigration) Down(ctx context.Context, db any) error { return nil }
 
 // migrationTemplateData holds the data needed to generate a new migration file from a template.
 type migrationTemplateData struct {

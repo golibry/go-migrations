@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/golibry/go-migrations/_examples/mysql/migrations"
+	"os"
+	"path/filepath"
+
+	_ "github.com/golibry/go-migrations/_examples/mysql/migrations"
 	"github.com/golibry/go-migrations/cli"
 	"github.com/golibry/go-migrations/execution/repository"
 	"github.com/golibry/go-migrations/migration"
-	"os"
-	"path/filepath"
 )
 
 func main() {
@@ -32,9 +33,16 @@ func main() {
 	ctx := context.Background()
 	dirPath := createMigrationsDirPath()
 	dbDsn := getDbDsn()
+	db, err := sql.Open("mysql", dbDsn)
+	if err != nil {
+		panic(fmt.Errorf("failed to connect to migrations db: %w", err))
+	}
+
 	cli.Bootstrap(
+		ctx,
+		db,
 		os.Args[1:],
-		buildRegistry(dirPath, ctx, dbDsn),
+		migration.NewAutoDirMigrationsRegistry(dirPath),
 		createMysqlRepository(dbDsn, ctx),
 		dirPath,
 		nil,
@@ -95,28 +103,4 @@ func getDbDsn() string {
 	}
 
 	return dsn
-}
-
-// buildRegistry This will create a new registry and register all migrations
-func buildRegistry(
-	dirPath migration.MigrationsDirPath,
-	ctx context.Context,
-	dbDsn string,
-) *migration.DirMigrationsRegistry {
-	// New db needed to not conflict with executions repository connection session
-	db, err := sql.Open("mysql", dbDsn)
-
-	if err != nil {
-		panic(fmt.Errorf("failed to connect to migrations db: %w", err))
-	}
-
-	// It's not necessary to add them in order, the tool will handle ordering based on
-	// their version number
-	allMigrations := []migration.Migration{
-		&migrations.Migration1712953077{Db: db},
-		&migrations.Migration1712953080{Db: db},
-		&migrations.Migration1712953083{Db: db, Ctx: ctx},
-	}
-
-	return migration.NewDirMigrationsRegistry(dirPath, allMigrations)
 }

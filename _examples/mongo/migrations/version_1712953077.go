@@ -2,13 +2,15 @@ package migrations
 
 import (
 	"context"
+	"github.com/golibry/go-migrations/migration"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
+func init() {
+	migration.Register(&Migration1712953077{})
+}
+
 type Migration1712953077 struct {
-	Client *mongo.Client
-	DbName string
-	Ctx    context.Context
 }
 
 func (migration *Migration1712953077) Version() uint64 {
@@ -21,7 +23,7 @@ type user struct {
 	FullName string `bson:"fullName"`
 }
 
-func (migration *Migration1712953077) Up() error {
+func (migration *Migration1712953077) Up(ctx context.Context, db any) error {
 	var users []interface{}
 
 	for _, u := range []user{
@@ -34,12 +36,14 @@ func (migration *Migration1712953077) Up() error {
 		users = append(users, u)
 	}
 
-	collection := migration.Client.Database(migration.DbName).Collection("users")
-	_, err := collection.InsertMany(migration.Ctx, users)
+	mongoDb := db.(*mongo.Database)
+	collection := mongoDb.Collection("users")
+	_, err := collection.InsertMany(ctx, users)
 	return err
 }
 
-func (migration *Migration1712953077) Down() error {
-	collection := migration.Client.Database(migration.DbName).Collection("users")
-	return collection.Drop(migration.Ctx)
+func (migration *Migration1712953077) Down(ctx context.Context, db any) error {
+	mongoDb := db.(*mongo.Database)
+	collection := mongoDb.Collection("users")
+	return collection.Drop(ctx)
 }

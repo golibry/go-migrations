@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"github.com/golibry/go-migrations/execution"
 	"github.com/golibry/go-migrations/migration"
@@ -34,6 +35,7 @@ func (suite *CliTestSuite) TestItFailsToBootstrapCliWhenMigrationsHandlerInitFai
 	var registry migration.MigrationsRegistry
 	var buf bytes.Buffer
 	Bootstrap(
+		context.Background(), nil,
 		[]string{}, registry, repo, migPath, nil,
 		&buf,
 		func(code int) {},
@@ -77,6 +79,7 @@ func (suite *CliTestSuite) TestItCanRunTheGivenCommand() {
 		migPath, _ := migration.NewMigrationsDirPath(suite.T().TempDir())
 		registry := migration.NewEmptyDirMigrationsRegistry(migPath)
 		Bootstrap(
+			context.Background(), nil,
 			scenario.inputArgs,
 			registry,
 			&execution.InMemoryRepository{},

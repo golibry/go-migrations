@@ -8,6 +8,7 @@
 package cli
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -40,25 +41,31 @@ type BootstrapSettings struct {
 // If no command is specified or an invalid command is provided, it displays the help information.
 //
 // Parameters:
+//   - ctx: Context for the migration execution
+//   - db: Database handle (or any other dependency) to be passed to migrations
 //   - args: Command-line arguments (typically os.Args[1:])
 //   - registry: Registry containing all available migrations
 //   - repository: Repository for storing migration execution state
 //   - dirPath: Path to the directory containing migration files
-//   - newHandler: Optional function to create a custom migrations handler; if nil, the default handler.NewHandler is used
+//   - newHandler: Optional function to create a custom migrations handler; if nil, the default handler.NewHandlerWithDB is used
 //
 // Example:
 //
-//		cli.Bootstrap(
-//			os.Args[1:],
-//			migration.NewDirMigrationsRegistry(dirPath, allMigrations),
-//			repository.NewMysqlHandler(dbDsn, "migration_executions", ctx, nil),
-//			dirPath,
-//			nil,
-//			os.Stdout,
-//			os.Exit,
-//	        nil,
-//		)
+//			cli.Bootstrap(
+//	         ctx,
+//	         db,
+//				os.Args[1:],
+//				migration.NewAutoDirMigrationsRegistry(dirPath),
+//				repository.NewPostgresHandler(dbDsn, "migration_executions", ctx, nil),
+//				dirPath,
+//				nil,
+//				os.Stdout,
+//				os.Exit,
+//		        nil,
+//			)
 func Bootstrap(
+	ctx context.Context,
+	db any,
 	args []string,
 	registry migration.MigrationsRegistry,
 	repository execution.Repository,
@@ -67,16 +74,17 @@ func Bootstrap(
 		registry migration.MigrationsRegistry,
 		repository execution.Repository,
 		newExecutionPlan handler.ExecutionPlanBuilder,
+		db any,
 	) (*handler.MigrationsHandler, error),
 	outputWriter io.Writer,
 	processExit func(code int),
 	settings *BootstrapSettings,
 ) {
 	if newHandler == nil {
-		newHandler = handler.NewHandler
+		newHandler = handler.NewHandlerWithDB
 	}
 
-	migrationsHandler, err := newHandler(registry, repository, nil)
+	migrationsHandler, err := newHandler(registry, repository, nil, db)
 
 	if err != nil {
 		panic(
@@ -88,10 +96,10 @@ func Bootstrap(
 	}
 
 	var up, down, forceUp, forceDown cli.Command
-	up = &MigrateUpCommand{handler: migrationsHandler}
-	down = &MigrateDownCommand{handler: migrationsHandler}
-	forceUp = &MigrateForceUpCommand{handler: migrationsHandler}
-	forceDown = &MigrateForceDownCommand{handler: migrationsHandler}
+	up = &MigrateUpCommand{handler: migrationsHandler, ctx: ctx}
+	down = &MigrateDownCommand{handler: migrationsHandler, ctx: ctx}
+	forceUp = &MigrateForceUpCommand{handler: migrationsHandler, ctx: ctx}
+	forceDown = &MigrateForceDownCommand{handler: migrationsHandler, ctx: ctx}
 
 	if settings != nil && settings.RunMigrationsExclusively {
 		lockName := MigrationsCmdLockName
@@ -150,6 +158,7 @@ type MigrateUpCommand struct {
 	steps     string
 	numOfRuns handler.NumOfRuns
 	handler   *handler.MigrationsHandler // Handler for executing migrations
+	ctx       context.Context
 }
 
 func (c *MigrateUpCommand) Id() string {
@@ -185,7 +194,7 @@ func (c *MigrateUpCommand) ValidateFlags() error {
 }
 
 func (c *MigrateUpCommand) Exec(stdWriter io.Writer) error {
-	execs, err := c.handler.MigrateUp(c.numOfRuns)
+	execs, err := c.handler.MigrateUp(c.ctx, c.numOfRuns)
 	_, _ = fmt.Fprintf(stdWriter, "Executed Up() for %d migrations\n", len(execs))
 
 	for _, execMig := range execs {
@@ -206,6 +215,7 @@ type MigrateDownCommand struct {
 	steps     string
 	numOfRuns handler.NumOfRuns
 	handler   *handler.MigrationsHandler // Handler for executing migrations
+	ctx       context.Context
 }
 
 func (c *MigrateDownCommand) Id() string {
@@ -239,7 +249,7 @@ func (c *MigrateDownCommand) ValidateFlags() error {
 }
 
 func (c *MigrateDownCommand) Exec(stdWriter io.Writer) error {
-	execs, err := c.handler.MigrateDown(c.numOfRuns)
+	execs, err := c.handler.MigrateDown(c.ctx, c.numOfRuns)
 	_, _ = fmt.Fprintf(stdWriter, "Executed Down() for %d migrations\n", len(execs))
 
 	for _, execMig := range execs {
@@ -359,6 +369,7 @@ type MigrateForceUpCommand struct {
 	rawVersion string
 	migVersion uint64
 	handler    *handler.MigrationsHandler // Handler for executing migrations
+	ctx        context.Context
 }
 
 func (c *MigrateForceUpCommand) Id() string {
@@ -391,7 +402,7 @@ func (c *MigrateForceUpCommand) ValidateFlags() error {
 }
 
 func (c *MigrateForceUpCommand) Exec(stdWriter io.Writer) error {
-	exec, err := c.handler.ForceUp(c.migVersion)
+	exec, err := c.handler.ForceUp(c.ctx, c.migVersion)
 
 	if exec.Execution != nil {
 		_, _ = fmt.Fprintf(
@@ -412,6 +423,7 @@ type MigrateForceDownCommand struct {
 	rawVersion string
 	migVersion uint64
 	handler    *handler.MigrationsHandler // Handler for executing migrations
+	ctx        context.Context
 }
 
 func (c *MigrateForceDownCommand) Id() string {
@@ -444,7 +456,7 @@ func (c *MigrateForceDownCommand) ValidateFlags() error {
 }
 
 func (c *MigrateForceDownCommand) Exec(stdWriter io.Writer) error {
-	exec, err := c.handler.ForceDown(c.migVersion)
+	exec, err := c.handler.ForceDown(c.ctx, c.migVersion)
 
 	if exec.Execution != nil {
 		_, _ = fmt.Fprintf(

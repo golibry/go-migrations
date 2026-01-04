@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"testing"
@@ -418,12 +419,12 @@ type FakeUpMigration struct {
 	migration.DummyMigration
 }
 
-func (f *FakeUpMigration) Up() error {
+func (f *FakeUpMigration) Up(ctx context.Context, db any) error {
 	f.upRan = true
 	return nil
 }
 
-func (f *FakeUpMigration) Down() error {
+func (f *FakeUpMigration) Down(ctx context.Context, db any) error {
 	f.downRan = true
 	return nil
 }
@@ -456,7 +457,7 @@ func (suite *HandlerTestSuite) TestItCanHandleFailureWhenMigratingUp() {
 
 		handler, _ := NewHandler(registry, repoMock, nil)
 		numOfRuns, _ := NewNumOfRuns("all")
-		handledMigrations, err := handler.MigrateUp(numOfRuns)
+		handledMigrations, err := handler.MigrateUp(context.Background(), numOfRuns)
 		handledMigrations = append(handledMigrations, ExecutedMigration{})
 		handledMigration := handledMigrations[0]
 		suite.Assert().Equal(
@@ -569,7 +570,7 @@ func (suite *HandlerTestSuite) TestItCanMigrateUp() {
 			buildRegistry(scenario.availableMigrations), repo, nil,
 		)
 		timeBefore := uint64(time.Now().UnixMilli())
-		handledMigrations, err := handler.MigrateUp(scenario.numOfRuns)
+		handledMigrations, err := handler.MigrateUp(context.Background(), scenario.numOfRuns)
 		timeAfter := uint64(time.Now().UnixMilli())
 
 		var uppedVersions []uint64
@@ -604,17 +605,17 @@ func (suite *HandlerTestSuite) TestItCanMigrateUp() {
 			"failed scenario: %s", name,
 		)
 
-  // Validate that repository contains finished executions for all expected versions,
-  // without assuming they were appended (repository uses upsert by version).
-  versionsMap := map[uint64]execution.MigrationExecution{}
-  for _, e := range repo.PersistedExecutions {
-      versionsMap[e.Version] = e
-  }
-  for _, v := range scenario.expectedVersions {
-      saved, ok := versionsMap[v]
-      suite.Assert().True(ok, "failed scenario: %s", name)
-      suite.Assert().True(saved.Finished(), "failed scenario: %s", name)
-  }
+		// Validate that repository contains finished executions for all expected versions,
+		// without assuming they were appended (repository uses upsert by version).
+		versionsMap := map[uint64]execution.MigrationExecution{}
+		for _, e := range repo.PersistedExecutions {
+			versionsMap[e.Version] = e
+		}
+		for _, v := range scenario.expectedVersions {
+			saved, ok := versionsMap[v]
+			suite.Assert().True(ok, "failed scenario: %s", name)
+			suite.Assert().True(saved.Finished(), "failed scenario: %s", name)
+		}
 	}
 }
 
@@ -711,7 +712,7 @@ func (suite *HandlerTestSuite) TestItCanMigrateDown() {
 		handler, _ := NewHandler(
 			buildRegistry(scenario.availableMigrations), repo, nil,
 		)
-		handledMigrations, err := handler.MigrateDown(scenario.numOfRuns)
+		handledMigrations, err := handler.MigrateDown(context.Background(), scenario.numOfRuns)
 
 		var downVersions []uint64
 		for _, mig := range handledMigrations {

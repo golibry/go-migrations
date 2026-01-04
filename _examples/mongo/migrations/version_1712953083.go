@@ -2,11 +2,16 @@ package migrations
 
 import (
 	"context"
+	"github.com/golibry/go-migrations/migration"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"strings"
 )
+
+func init() {
+	migration.Register(&Migration1712953083{})
+}
 
 const FullNameSplitLock = "full-name-split-lock"
 
@@ -24,9 +29,6 @@ type userWithFullNameSplit struct {
 }
 
 type Migration1712953083 struct {
-	Client *mongo.Client
-	DbName string
-	Ctx    context.Context
 }
 
 func (migration *Migration1712953083) Version() uint64 {
@@ -35,8 +37,13 @@ func (migration *Migration1712953083) Version() uint64 {
 
 type runChange func(session mongo.Session) error
 
-func (migration *Migration1712953083) lockAndRunChange(run runChange) error {
-	session, err := migration.Client.StartSession()
+func (migration *Migration1712953083) lockAndRunChange(
+	ctx context.Context,
+	db *mongo.Database,
+	run runChange,
+) error {
+	client := db.Client()
+	session, err := client.StartSession()
 
 	if err != nil {
 		return err
@@ -48,11 +55,11 @@ func (migration *Migration1712953083) lockAndRunChange(run runChange) error {
 		return err
 	}
 
-	locksCollection := session.Client().Database(migration.DbName).Collection("locks")
+	locksCollection := db.Collection("locks")
 
 	// Obtain collection lock for update
 	locksCollection.FindOneAndUpdate(
-		migration.Ctx,
+		ctx,
 		bson.D{{"lockName", FullNameSplitLock}},
 		bson.D{
 			{"$set", bson.D{{"randVal", primitive.NewObjectID()}}},
@@ -60,27 +67,29 @@ func (migration *Migration1712953083) lockAndRunChange(run runChange) error {
 	)
 
 	err = run(session)
-	_, _ = locksCollection.DeleteOne(migration.Ctx, bson.D{{"lockName", FullNameSplitLock}})
+	_, _ = locksCollection.DeleteOne(ctx, bson.D{{"lockName", FullNameSplitLock}})
 
 	if err != nil {
-		_ = session.AbortTransaction(migration.Ctx)
+		_ = session.AbortTransaction(ctx)
 		return err
 	}
 
-	if err = session.CommitTransaction(migration.Ctx); err != nil {
-		_ = session.AbortTransaction(migration.Ctx)
+	if err = session.CommitTransaction(ctx); err != nil {
+		_ = session.AbortTransaction(ctx)
 		return err
 	}
 
 	return nil
 }
 
-func (migration *Migration1712953083) Up() error {
+func (migration *Migration1712953083) Up(ctx context.Context, db any) error {
+	mongoDb := db.(*mongo.Database)
 	return migration.lockAndRunChange(
+		ctx, mongoDb,
 		func(session mongo.Session) error {
-			usersCollection := session.Client().Database(migration.DbName).Collection("users")
+			usersCollection := mongoDb.Collection("users")
 			usersCursor, err := usersCollection.Find(
-				migration.Ctx,
+				ctx,
 				bson.D{},
 			)
 
@@ -89,7 +98,7 @@ func (migration *Migration1712953083) Up() error {
 			}
 
 			var results []userWithNewPhone
-			err = usersCursor.All(migration.Ctx, &results)
+			err = usersCursor.All(ctx, &results)
 
 			if err != nil {
 				return err
@@ -104,7 +113,7 @@ func (migration *Migration1712953083) Up() error {
 					LastName:  nameSplit[1],
 				}
 				_, err = usersCollection.ReplaceOne(
-					migration.Ctx,
+					ctx,
 					bson.D{{"email", userToChange.Email}},
 					changedUser,
 				)
@@ -119,12 +128,14 @@ func (migration *Migration1712953083) Up() error {
 	)
 }
 
-func (migration *Migration1712953083) Down() error {
+func (migration *Migration1712953083) Down(ctx context.Context, db any) error {
+	mongoDb := db.(*mongo.Database)
 	return migration.lockAndRunChange(
+		ctx, mongoDb,
 		func(session mongo.Session) error {
-			usersCollection := session.Client().Database(migration.DbName).Collection("users")
+			usersCollection := mongoDb.Collection("users")
 			usersCursor, err := usersCollection.Find(
-				migration.Ctx,
+				ctx,
 				bson.D{},
 			)
 
@@ -133,7 +144,7 @@ func (migration *Migration1712953083) Down() error {
 			}
 
 			var results []userWithFullNameSplit
-			err = usersCursor.All(migration.Ctx, &results)
+			err = usersCursor.All(ctx, &results)
 
 			if err != nil {
 				return err
@@ -147,7 +158,7 @@ func (migration *Migration1712953083) Down() error {
 					FullName: fullName,
 				}
 				_, err = usersCollection.ReplaceOne(
-					migration.Ctx,
+					ctx,
 					bson.D{{"email", userToChange.Email}},
 					changedUser,
 				)

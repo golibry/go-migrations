@@ -4,26 +4,30 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/golibry/go-migrations/migration"
 )
 
+func init() {
+	migration.Register(&Migration1712953083{})
+}
+
 type Migration1712953083 struct {
-	Db  *sql.DB
-	Ctx context.Context
 }
 
 func (migration *Migration1712953083) Version() uint64 {
 	return 1712953083
 }
 
-func (migration *Migration1712953083) Up() error {
-	tx, err := migration.Db.BeginTx(migration.Ctx, nil)
+func (migration *Migration1712953083) Up(ctx context.Context, db any) error {
+	sqlDb := db.(*sql.DB)
+	tx, err := sqlDb.BeginTx(ctx, nil)
 
 	if err != nil {
 		return err
 	}
 
 	_, err = tx.ExecContext(
-		migration.Ctx,
+		ctx,
 		"insert into `users` (`name`, `phone_num`) values ('Alex', '1234'), ('Jada', '4567'), ('Tia', '7890')",
 	)
 
@@ -39,15 +43,16 @@ func (migration *Migration1712953083) Up() error {
 	return tx.Commit()
 }
 
-func (migration *Migration1712953083) Down() error {
-	tx, err := migration.Db.BeginTx(migration.Ctx, nil)
+func (migration *Migration1712953083) Down(ctx context.Context, db any) error {
+	sqlDb := db.(*sql.DB)
+	tx, err := sqlDb.BeginTx(ctx, nil)
 
 	if err != nil {
 		return err
 	}
 
 	_, err = tx.ExecContext(
-		migration.Ctx,
+		ctx,
 		"delete from `users` where `name` in ('Alex', 'Jada', 'Tia')",
 	)
 

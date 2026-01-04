@@ -9,6 +9,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -169,12 +170,22 @@ type MigrationsHandler struct {
 	registry         migration.MigrationsRegistry
 	repository       execution.Repository
 	newExecutionPlan ExecutionPlanBuilder
+	db               any
 }
 
 func NewHandler(
 	registry migration.MigrationsRegistry,
 	repository execution.Repository,
 	newExecutionPlan ExecutionPlanBuilder,
+) (*MigrationsHandler, error) {
+	return NewHandlerWithDB(registry, repository, newExecutionPlan, nil)
+}
+
+func NewHandlerWithDB(
+	registry migration.MigrationsRegistry,
+	repository execution.Repository,
+	newExecutionPlan ExecutionPlanBuilder,
+	db any,
 ) (*MigrationsHandler, error) {
 	err := repository.Init()
 
@@ -193,6 +204,7 @@ func NewHandler(
 		registry:         registry,
 		repository:       repository,
 		newExecutionPlan: newExecutionPlan,
+		db:               db,
 	}, nil
 }
 
@@ -224,7 +236,10 @@ func NewNumOfRuns(num string) (NumOfRuns, error) {
 	return NumOfRuns(parsedNum), nil
 }
 
-func (handler *MigrationsHandler) MigrateUp(numOfRuns NumOfRuns) ([]ExecutedMigration, error) {
+func (handler *MigrationsHandler) MigrateUp(
+	ctx context.Context,
+	numOfRuns NumOfRuns,
+) ([]ExecutedMigration, error) {
 	if handler.registry.Count() == 0 {
 		return []ExecutedMigration{}, nil
 	}
@@ -246,7 +261,7 @@ func (handler *MigrationsHandler) MigrateUp(numOfRuns NumOfRuns) ([]ExecutedMigr
 		migrationToExec := allToBeExec[i]
 		exec := execution.StartExecution(migrationToExec)
 
-		if err = migrationToExec.Up(); err == nil {
+		if err = migrationToExec.Up(ctx, handler.db); err == nil {
 			exec.FinishExecution()
 		}
 
@@ -262,7 +277,10 @@ func (handler *MigrationsHandler) MigrateUp(numOfRuns NumOfRuns) ([]ExecutedMigr
 	return handledMigrations, err
 }
 
-func (handler *MigrationsHandler) MigrateDown(numOfRuns NumOfRuns) ([]ExecutedMigration, error) {
+func (handler *MigrationsHandler) MigrateDown(
+	ctx context.Context,
+	numOfRuns NumOfRuns,
+) ([]ExecutedMigration, error) {
 	errMsg := "failed to migrate all down"
 
 	plan, err := handler.newExecutionPlan(handler.registry, handler.repository)
@@ -279,7 +297,7 @@ func (handler *MigrationsHandler) MigrateDown(numOfRuns NumOfRuns) ([]ExecutedMi
 	var handledMigrations []ExecutedMigration
 	for i := 0; i < actualNumOfRuns; i++ {
 		execMig := execMigrations[i]
-		if err = execMig.Migration.Down(); err != nil {
+		if err = execMig.Migration.Down(ctx, handler.db); err != nil {
 			handledMigrations = append(handledMigrations, ExecutedMigration{execMig.Migration, nil})
 			break
 		}
@@ -297,7 +315,10 @@ func (handler *MigrationsHandler) MigrateDown(numOfRuns NumOfRuns) ([]ExecutedMi
 	return handledMigrations, err
 }
 
-func (handler *MigrationsHandler) ForceUp(version uint64) (ExecutedMigration, error) {
+func (handler *MigrationsHandler) ForceUp(ctx context.Context, version uint64) (
+	ExecutedMigration,
+	error,
+) {
 	migrationToExec := handler.registry.Get(version)
 	if migrationToExec == nil {
 		return ExecutedMigration{nil, nil}, nil
@@ -305,7 +326,7 @@ func (handler *MigrationsHandler) ForceUp(version uint64) (ExecutedMigration, er
 
 	exec := execution.StartExecution(migrationToExec)
 
-	err := migrationToExec.Up()
+	err := migrationToExec.Up(ctx, handler.db)
 	if err == nil {
 		exec.FinishExecution()
 	}
@@ -321,7 +342,10 @@ func (handler *MigrationsHandler) ForceUp(version uint64) (ExecutedMigration, er
 	return ExecutedMigration{migrationToExec, exec}, err
 }
 
-func (handler *MigrationsHandler) ForceDown(version uint64) (ExecutedMigration, error) {
+func (handler *MigrationsHandler) ForceDown(ctx context.Context, version uint64) (
+	ExecutedMigration,
+	error,
+) {
 	errMsg := "failed to migrate down forcefully"
 
 	migrationToExec := handler.registry.Get(version)
@@ -342,7 +366,7 @@ func (handler *MigrationsHandler) ForceDown(version uint64) (ExecutedMigration, 
 		)
 	}
 
-	if errDown := migrationToExec.Down(); errDown != nil {
+	if errDown := migrationToExec.Down(ctx, handler.db); errDown != nil {
 		return ExecutedMigration{migrationToExec, nil}, fmt.Errorf(
 			"%s, down() failed with error: %w", errMsg, errDown,
 		)

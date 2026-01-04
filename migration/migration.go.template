@@ -1,15 +1,24 @@
 package {{.PackageName}}
 
+import (
+	"context"
+	"github.com/golibry/go-migrations/migration"
+)
+
+func init() {
+	migration.Register(&Migration{{.Version}}{})
+}
+
 type Migration{{.Version}} struct {}
 
 func(migration *Migration{{.Version}}) Version() uint64 {
 	return {{.Version}} // Do not edit this! If you do, migrations may run out of order
 }
 
-func(migration *Migration{{.Version}}) Up() error {
+func(migration *Migration{{.Version}}) Up(ctx context.Context, db any) error {
 	return nil
 }
 
-func(migration *Migration{{.Version}}) Down() error {
+func(migration *Migration{{.Version}}) Down(ctx context.Context, db any) error {
 	return nil
 }

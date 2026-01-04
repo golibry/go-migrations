@@ -86,7 +86,11 @@ func (suite *MigrationTestSuite) TestItCanGenerateBlankMigrationFile() {
 		string(fileContents),
 	)
 	suite.Assert().Regexp(
-		"func\\(migration \\*Migration"+versionString+"\\) Version\\(\\) uint64 \\{[\\s]+return "+versionString,
+		"func\\(migration \\*Migration"+versionString+"\\) Up\\(ctx context.Context, db any\\) error \\{[\\s]+return nil[\\s]+\\}",
+		string(fileContents),
+	)
+	suite.Assert().Regexp(
+		"func\\(migration \\*Migration"+versionString+"\\) Down\\(ctx context.Context, db any\\) error \\{[\\s]+return nil[\\s]+\\}",
 		string(fileContents),
 	)
 }

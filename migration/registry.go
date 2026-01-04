@@ -10,6 +10,17 @@ import (
 	"strings"
 )
 
+// DefaultRegistry is a global registry that migrations can self-register to.
+var DefaultRegistry = NewGenericRegistry()
+
+// Register adds a migration to the global DefaultRegistry.
+// This is typically called from an init() function in a migration file.
+func Register(migration Migration) {
+	if err := DefaultRegistry.Register(migration); err != nil {
+		panic(fmt.Errorf("failed to register migration to DefaultRegistry: %w", err))
+	}
+}
+
 // MigrationsRegistry allows implementations to manage a collection of migration files.
 // Implementations should act as a single source for all created migrations.
 type MigrationsRegistry interface {
@@ -103,6 +114,12 @@ type DirMigrationsRegistry struct {
 // for the use case where migrations are saved in a directory.
 func NewEmptyDirMigrationsRegistry(dirPath MigrationsDirPath) *DirMigrationsRegistry {
 	return &DirMigrationsRegistry{*NewGenericRegistry(), dirPath}
+}
+
+// NewAutoDirMigrationsRegistry builds a migrations registry using migrations
+// from DefaultRegistry and validates them against the specified directory.
+func NewAutoDirMigrationsRegistry(dirPath MigrationsDirPath) *DirMigrationsRegistry {
+	return NewDirMigrationsRegistry(dirPath, DefaultRegistry.OrderedMigrations())
 }
 
 // NewDirMigrationsRegistry builds a migrations registry with all migrations available
