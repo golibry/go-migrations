@@ -20,8 +20,8 @@ type PostgresHandler struct {
 }
 
 // NewPostgresHandler Builds a new PostgresHandler. If db is nil, it will try to build a db handle
-// from the provided dsn. It's preferable to not share the db handle used by the handler with
-// the one you pass in your migrations (this way, db sessions will not be mixed)
+// from the provided dsn. It is recommended to share the same *sql.DB handle between
+// your application and this handler to efficiently manage connection pools.
 func NewPostgresHandler(
 	dsn string,
 	tableName string,

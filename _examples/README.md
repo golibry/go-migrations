@@ -1,7 +1,7 @@
 ## Examples  
   
 Each folder integrates with a storage type (repository) the library supports (mysql, mongo, postgres).  
-To play with these examples follow the bellow steps:  
+To play with these examples, follow the bellow steps:  
   
 1. Change directory to project root
 2. Start the containers: ``docker compose up -d``
@@ -12,7 +12,7 @@ To play with these examples follow the bellow steps:
    - MongoDB: ``go build -tags mongo -o ./bin/migrate``  
    - Postgres: ``go build -tags postgres -o ./bin/migrate``  
 6. Create a database with the name used in your connection settings (see .env file)  
-7. Get helpful info from the migrate binary: ``./bin/migrate help``
-8. Run one migration Up() from the migrate binary: ``./bin/migrate up``
-9. Run 3 migrations Up() from the migrate binary: ``./bin/migrate up --steps=3``
-10. Run all migrations Up() from the migrate binary: ``./bin/migrate up --steps=all``
+7. Get helpful info from the "migrate" binary: ``./bin/migrate help``
+8. Run one migration Up() from the "migrate" binary: ``./bin/migrate up``
+9. Run migrations (3) Up() from the "migrate" binary: ``./bin/migrate up --steps=3``
+10. Run all migrations Up() from the "migrate" binary: ``./bin/migrate up --steps=all``

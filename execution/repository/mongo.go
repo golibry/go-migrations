@@ -52,8 +52,8 @@ type MongoHandler struct {
 }
 
 // NewMongoHandler Builds a new MongoHandler. If client is nil, it will try to build a client
-// from the provided dsn. It's preferable to not share the client used by the handler with
-// the one you pass in your migrations (this way, client sessions will not be mixed)
+// from the provided dsn. It is recommended to share the same *mongo.Client handle between
+// your application and this handler to efficiently manage connection pools.
 func NewMongoHandler(
 	dsn string,
 	databaseName string,
@@ -95,44 +95,44 @@ func (h *MongoHandler) Init() error {
 		bson.D{
 			{
 				Key: "$jsonSchema", Value: bson.D{
-					{Key: "bsonType", Value: "object"},
-					{Key: "title", Value: "migration execution object validation"},
+				{Key: "bsonType", Value: "object"},
+				{Key: "title", Value: "migration execution object validation"},
+				{
+					Key: "properties", Value: bson.D{
 					{
-						Key: "properties", Value: bson.D{
-							{
-								Key: "_id", Value: bson.D{
-									{Key: "bsonType", Value: "long"},
-									{Key: "minimum", Value: 0},
-									{
-										Key: "description",
-										Value: "_id (executed version) must be greater or equal" +
-											" to 0",
-									},
-								},
-							},
-							{
-								Key: "executedAtMs", Value: bson.D{
-									{Key: "bsonType", Value: "long"},
-									{Key: "minimum", Value: 0},
-									{
-										Key:   "description",
-										Value: "executed at must be greater or equal to 0",
-									},
-								},
-							},
-							{
-								Key: "finishedAtMs", Value: bson.D{
-									{Key: "bsonType", Value: "long"},
-									{Key: "minimum", Value: 0},
-									{
-										Key:   "description",
-										Value: "finished at must be greater or equal to 0",
-									},
-								},
-							},
+						Key: "_id", Value: bson.D{
+						{Key: "bsonType", Value: "long"},
+						{Key: "minimum", Value: 0},
+						{
+							Key: "description",
+							Value: "_id (executed version) must be greater or equal" +
+								" to 0",
 						},
 					},
+					},
+					{
+						Key: "executedAtMs", Value: bson.D{
+						{Key: "bsonType", Value: "long"},
+						{Key: "minimum", Value: 0},
+						{
+							Key:   "description",
+							Value: "executed at must be greater or equal to 0",
+						},
+					},
+					},
+					{
+						Key: "finishedAtMs", Value: bson.D{
+						{Key: "bsonType", Value: "long"},
+						{Key: "minimum", Value: 0},
+						{
+							Key:   "description",
+							Value: "finished at must be greater or equal to 0",
+						},
+					},
+					},
 				},
+				},
+			},
 			},
 		},
 	)

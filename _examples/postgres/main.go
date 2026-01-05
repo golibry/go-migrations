@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+
 	_ "github.com/golibry/go-migrations/_examples/postgres/migrations"
 	"github.com/golibry/go-migrations/cli"
 	"github.com/golibry/go-migrations/execution/repository"
 	"github.com/golibry/go-migrations/migration"
-	"os"
-	"path/filepath"
 )
 
 func main() {
@@ -42,7 +43,7 @@ func main() {
 		db,
 		os.Args[1:],
 		migration.NewAutoDirMigrationsRegistry(dirPath),
-		createPostgresRepository(dbDsn, ctx),
+		createPostgresRepository(db, ctx),
 		dirPath,
 		nil,
 		os.Stdout,
@@ -74,10 +75,10 @@ func createMigrationsDirPath() migration.MigrationsDirPath {
 }
 
 func createPostgresRepository(
-	dbDsn string,
+	db *sql.DB,
 	ctx context.Context,
 ) *repository.PostgresHandler {
-	repo, err := repository.NewPostgresHandler(dbDsn, "migration_executions", ctx, nil)
+	repo, err := repository.NewPostgresHandler("", "migration_executions", ctx, db)
 
 	if err != nil {
 		panic(fmt.Errorf("failed to build executions repository: %w", err))

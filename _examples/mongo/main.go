@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/golibry/go-migrations/_examples/mongo/migrations"
+	"os"
+	"path/filepath"
+
 	"github.com/golibry/go-migrations/cli"
 	"github.com/golibry/go-migrations/execution/repository"
 	"github.com/golibry/go-migrations/migration"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"os"
-	"path/filepath"
 )
 
 func main() {
@@ -33,10 +33,23 @@ func main() {
 	ctx := context.Background()
 	dirPath := createMigrationsDirPath()
 	dbDsn := getDbDsn()
+	dbName := getDbName()
+
+	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
+	opts := options.Client().ApplyURI(dbDsn).SetServerAPIOptions(serverAPI)
+	client, err := mongo.Connect(ctx, opts)
+	if err != nil {
+		panic(fmt.Errorf("failed to connect to migrations db: %w", err))
+	}
+
+	db := client.Database(dbName)
+
 	cli.Bootstrap(
+		ctx,
+		db,
 		os.Args[1:],
-		buildRegistry(dirPath, ctx, dbDsn, getDbName()),
-		createMongoRepository(dbDsn, ctx),
+		migration.NewAutoDirMigrationsRegistry(dirPath),
+		createMongoRepository(client, ctx, dbName),
 		dirPath,
 		nil,
 		os.Stdout,
@@ -53,7 +66,7 @@ func createMigrationsDirPath() migration.MigrationsDirPath {
 	}
 
 	dirPath, err := migration.NewMigrationsDirPath(
-		filepath.Join(appBaseDir, "_examples/mysql/migrations"),
+		filepath.Join(appBaseDir, "_examples/mongo/migrations"),
 	)
 
 	if err != nil {
@@ -64,15 +77,16 @@ func createMigrationsDirPath() migration.MigrationsDirPath {
 }
 
 func createMongoRepository(
-	dbDsn string,
+	client *mongo.Client,
 	ctx context.Context,
+	dbName string,
 ) *repository.MongoHandler {
 	repo, err := repository.NewMongoHandler(
-		dbDsn,
-		getDbName(),
+		"",
+		dbName,
 		getCollectionName(),
 		ctx,
-		nil,
+		client,
 	)
 
 	if err != nil {
@@ -107,38 +121,10 @@ func getDbDsn() string {
 	dsn := os.Getenv("MONGO_DSN")
 
 	if dsn == "" {
-		// Needed if ran from host machine because we are missing the env variables
+		// Needed if ran from the host machine because we are missing the env variables
 		// See pass and port in .env file
 		dsn = "mongodb://localhost:27017"
 	}
 
 	return dsn
-}
-
-// buildRegistry This will create a new registry and register all migrations
-func buildRegistry(
-	dirPath migration.MigrationsDirPath,
-	ctx context.Context,
-	dbDsn string,
-	dbName string,
-) *migration.DirMigrationsRegistry {
-	// New db needed to not conflict with executions repository connections
-	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
-	opts := options.Client().ApplyURI(dbDsn).SetServerAPIOptions(serverAPI)
-	opts.SetMaxPoolSize(1)
-	client, err := mongo.Connect(ctx, opts)
-
-	if err != nil {
-		panic(fmt.Errorf("failed to connect to migrations db: %w", err))
-	}
-
-	// It's not necessary to add them in order, the tool will handle ordering based on
-	// their version number
-	allMigrations := []migration.Migration{
-		&migrations.Migration1712953077{Client: client, DbName: dbName, Ctx: ctx},
-		&migrations.Migration1712953080{Client: client, DbName: dbName, Ctx: ctx},
-		&migrations.Migration1712953083{Client: client, DbName: dbName, Ctx: ctx},
-	}
-
-	return migration.NewDirMigrationsRegistry(dirPath, allMigrations)
 }

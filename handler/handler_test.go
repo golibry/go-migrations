@@ -429,6 +429,10 @@ func (f *FakeUpMigration) Down(ctx context.Context, db any) error {
 	return nil
 }
 
+func (f *FakeUpMigration) Version() uint64 {
+	return f.DummyMigration.Version()
+}
+
 func (suite *HandlerTestSuite) TestItCanHandleFailureWhenMigratingUp() {
 	scenarios := map[string]struct {
 		errMsg                  string

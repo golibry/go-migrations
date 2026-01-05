@@ -45,12 +45,29 @@ type Migration interface {
 	// Up() act as a unit, but, care should be taken when coordinating them (use save points
 	// for example, and save them in a central place which can be used as a persistent
 	// source of truth).
+	//
+	// Guidance on Transactions:
+	// For SQL databases, if you want your migration to be atomic, you should start a
+	// transaction using the provided db handle (which is usually a *sql.DB), for example:
+	//
+	//	sqlDb := db.(*sql.DB)
+	//	tx, err := sqlDb.BeginTx(ctx, nil)
+	//	if err != nil { return err }
+	//	// ... execute migration logic using tx.ExecContext ...
+	//	return tx.Commit()
+	//
+	// Some DDL statements (like CREATE TABLE or ALTER TABLE in MySQL) cause an implicit
+	// commit and cannot be rolled back. In such cases, transactions might not behave
+	// as expected.
 	Up(ctx context.Context, db any) error
 
 	// Down must include all necessary code that will roll back the changes made by the Up()
 	// function. Care should be taken when designing your rollback strategy, to not lose any
 	// critical database state. Other things mentioned for Up() function are valid for Down()
 	// also.
+	//
+	// Guidance on Transactions:
+	// The same transaction principles from Up() apply to Down().
 	Down(ctx context.Context, db any) error
 }
 

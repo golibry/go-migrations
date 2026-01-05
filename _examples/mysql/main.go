@@ -43,7 +43,7 @@ func main() {
 		db,
 		os.Args[1:],
 		migration.NewAutoDirMigrationsRegistry(dirPath),
-		createMysqlRepository(dbDsn, ctx),
+		createMysqlRepository(db, ctx),
 		dirPath,
 		nil,
 		os.Stdout,
@@ -75,10 +75,10 @@ func createMigrationsDirPath() migration.MigrationsDirPath {
 }
 
 func createMysqlRepository(
-	dbDsn string,
+	db *sql.DB,
 	ctx context.Context,
 ) *repository.MysqlHandler {
-	repo, err := repository.NewMysqlHandler(dbDsn, "migration_executions", ctx, nil)
+	repo, err := repository.NewMysqlHandler("", "migration_executions", ctx, db)
 
 	if err != nil {
 		panic(fmt.Errorf("failed to build executions repository: %w", err))
@@ -97,7 +97,7 @@ func getDbDsn() string {
 	}
 
 	if dsn == "" {
-		// Needed if ran from host machine because we are missing the env variables
+		// Needed if ran from the host machine because we are missing the env variables
 		// See pass and port in .env file
 		dsn = "root:123456789@tcp(localhost:3306)/" + dbName
 	}
