@@ -1,4 +1,4 @@
-//go:build mongo
+//go:build mongo && integration
 
 package repository
 
@@ -10,9 +10,9 @@ import (
 	"github.com/golibry/go-migrations/execution"
 	"github.com/stretchr/testify/suite"
 	mongodbtc "github.com/testcontainers/testcontainers-go/modules/mongodb"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const MongoCollectionName = "migration_executions"
@@ -55,11 +55,16 @@ func (suite *MongoTestSuite) SetupSuite() {
 	opts.SetConnectTimeout(10 * time.Second)
 	opts.SetServerSelectionTimeout(20 * time.Second)
 	opts.SetTimeout(20 * time.Second)
-	opts.SetSocketTimeout(20 * time.Second)
-	client, err := mongo.Connect(context.Background(), opts)
+	client, err := mongo.Connect(opts)
 	suite.Require().NoError(err)
 
-	suite.handler = &MongoHandler{client, suite.dbName, MongoCollectionName, context.Background()}
+	suite.handler = &MongoHandler{
+		client:         client,
+		databaseName:   suite.dbName,
+		collectionName: MongoCollectionName,
+		lockName:       "go-migrations:" + suite.dbName + "." + MongoCollectionName,
+		ctx:            context.Background(),
+	}
 	suite.client = suite.handler.client
 	suite.Require().NoError(suite.handler.Init())
 }

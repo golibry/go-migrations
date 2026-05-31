@@ -159,6 +159,26 @@ func (plan *ExecutionPlan) LastExecuted() ExecutedMigration {
 	return ExecutedMigration{}
 }
 
+func (plan *ExecutionPlan) Dirty() bool {
+	return plan.UnfinishedExecution().Execution != nil
+}
+
+func (plan *ExecutionPlan) UnfinishedExecution() ExecutedMigration {
+	if len(plan.orderedExecutions) == 0 {
+		return ExecutedMigration{}
+	}
+
+	lastExecution := plan.orderedExecutions[len(plan.orderedExecutions)-1]
+	if lastExecution.Finished() {
+		return ExecutedMigration{}
+	}
+
+	return ExecutedMigration{
+		Migration: plan.orderedMigrations[len(plan.orderedExecutions)-1],
+		Execution: &lastExecution,
+	}
+}
+
 type ExecutionPlanBuilder func(
 	registry migration.MigrationsRegistry,
 	repository execution.Repository,
@@ -240,6 +260,15 @@ func (handler *MigrationsHandler) MigrateUp(
 	ctx context.Context,
 	numOfRuns NumOfRuns,
 ) ([]ExecutedMigration, error) {
+	return withRepositoryLock(handler, func() ([]ExecutedMigration, error) {
+		return handler.migrateUp(ctx, numOfRuns)
+	})
+}
+
+func (handler *MigrationsHandler) migrateUp(
+	ctx context.Context,
+	numOfRuns NumOfRuns,
+) ([]ExecutedMigration, error) {
 	if handler.registry.Count() == 0 {
 		return []ExecutedMigration{}, nil
 	}
@@ -260,16 +289,26 @@ func (handler *MigrationsHandler) MigrateUp(
 	for i := 0; i < actualNumOfRuns; i++ {
 		migrationToExec := allToBeExec[i]
 		exec := execution.StartExecution(migrationToExec)
+		if err = handler.repository.Save(*exec); err != nil {
+			return handledMigrations, fmt.Errorf("%s, failed to save started execution: %w", errMsg, err)
+		}
 
 		if err = migrationToExec.Up(ctx, handler.db); err == nil {
 			exec.FinishExecution()
 		}
 
 		handledMigrations = append(handledMigrations, ExecutedMigration{migrationToExec, exec})
-		saveErr := handler.repository.Save(*exec)
+		saveErr := error(nil)
+		if exec.Finished() {
+			saveErr = handler.repository.Save(*exec)
+		}
 
-		if err != nil || saveErr != nil {
-			err = fmt.Errorf("%s, errors: %w, %w", errMsg, err, saveErr)
+		if err != nil {
+			err = fmt.Errorf("%s, migration up failed: %w", errMsg, err)
+			break
+		}
+		if saveErr != nil {
+			err = fmt.Errorf("%s, failed to save finished execution: %w", errMsg, saveErr)
 			break
 		}
 	}
@@ -278,6 +317,15 @@ func (handler *MigrationsHandler) MigrateUp(
 }
 
 func (handler *MigrationsHandler) MigrateDown(
+	ctx context.Context,
+	numOfRuns NumOfRuns,
+) ([]ExecutedMigration, error) {
+	return withRepositoryLock(handler, func() ([]ExecutedMigration, error) {
+		return handler.migrateDown(ctx, numOfRuns)
+	})
+}
+
+func (handler *MigrationsHandler) migrateDown(
 	ctx context.Context,
 	numOfRuns NumOfRuns,
 ) ([]ExecutedMigration, error) {
@@ -319,19 +367,34 @@ func (handler *MigrationsHandler) ForceUp(ctx context.Context, version uint64) (
 	ExecutedMigration,
 	error,
 ) {
+	return withRepositoryLock(handler, func() (ExecutedMigration, error) {
+		return handler.forceUp(ctx, version)
+	})
+}
+
+func (handler *MigrationsHandler) forceUp(ctx context.Context, version uint64) (
+	ExecutedMigration,
+	error,
+) {
 	migrationToExec := handler.registry.Get(version)
 	if migrationToExec == nil {
 		return ExecutedMigration{nil, nil}, nil
 	}
 
 	exec := execution.StartExecution(migrationToExec)
+	if err := handler.repository.Save(*exec); err != nil {
+		return ExecutedMigration{migrationToExec, exec}, err
+	}
 
 	err := migrationToExec.Up(ctx, handler.db)
 	if err == nil {
 		exec.FinishExecution()
 	}
 
-	errSave := handler.repository.Save(*exec)
+	errSave := error(nil)
+	if exec.Finished() {
+		errSave = handler.repository.Save(*exec)
+	}
 
 	if err == nil {
 		err = errSave
@@ -343,6 +406,15 @@ func (handler *MigrationsHandler) ForceUp(ctx context.Context, version uint64) (
 }
 
 func (handler *MigrationsHandler) ForceDown(ctx context.Context, version uint64) (
+	ExecutedMigration,
+	error,
+) {
+	return withRepositoryLock(handler, func() (ExecutedMigration, error) {
+		return handler.forceDown(ctx, version)
+	})
+}
+
+func (handler *MigrationsHandler) forceDown(ctx context.Context, version uint64) (
 	ExecutedMigration,
 	error,
 ) {
@@ -375,4 +447,59 @@ func (handler *MigrationsHandler) ForceDown(ctx context.Context, version uint64)
 	err = handler.repository.Remove(*exec)
 
 	return ExecutedMigration{migrationToExec, exec}, err
+}
+
+func (handler *MigrationsHandler) ForceFinish(version uint64) (*execution.MigrationExecution, error) {
+	return withRepositoryLock(handler, func() (*execution.MigrationExecution, error) {
+		exec, err := handler.repository.FindOne(version)
+		if err != nil {
+			return nil, err
+		}
+		if exec == nil {
+			return nil, nil
+		}
+
+		exec.FinishExecution()
+		if err = handler.repository.Save(*exec); err != nil {
+			return nil, err
+		}
+
+		return exec, nil
+	})
+}
+
+func (handler *MigrationsHandler) ForceRemove(version uint64) (*execution.MigrationExecution, error) {
+	return withRepositoryLock(handler, func() (*execution.MigrationExecution, error) {
+		exec, err := handler.repository.FindOne(version)
+		if err != nil {
+			return nil, err
+		}
+		if exec == nil {
+			return nil, nil
+		}
+
+		if err = handler.repository.Remove(*exec); err != nil {
+			return nil, err
+		}
+
+		return exec, nil
+	})
+}
+
+func withRepositoryLock[T any](handler *MigrationsHandler, fn func() (T, error)) (T, error) {
+	locker, ok := handler.repository.(execution.RepositoryLocker)
+	if !ok {
+		return fn()
+	}
+
+	unlock, err := locker.Lock()
+	var zero T
+	if err != nil {
+		return zero, err
+	}
+	defer func() {
+		_ = unlock()
+	}()
+
+	return fn()
 }

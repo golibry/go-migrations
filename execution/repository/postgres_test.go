@@ -1,4 +1,4 @@
-//go:build postgres
+//go:build postgres && integration
 
 package repository
 
@@ -50,32 +50,32 @@ func (suite *PostgresTestSuite) SetupSuite() {
 	suite.dsn = connStr
 	suite.dbName = "migrations"
 
-    suite.handler, err = NewPostgresHandler(
-        suite.dsn,
-        PostgresExecutionsTable,
-        context.Background(),
-        nil,
-    )
-    suite.Require().NoError(err)
-    suite.db = suite.handler.db
+	suite.handler, err = NewPostgresHandler(
+		suite.dsn,
+		PostgresExecutionsTable,
+		context.Background(),
+		nil,
+	)
+	suite.Require().NoError(err)
+	suite.db = suite.handler.db
 
-    // Wait for the database to become ready (max 20s)
-    deadline := time.Now().Add(20 * time.Second)
-    var pingErr error
-    for {
-        // Use a short per-ping timeout
-        ctxPing, cancelPing := context.WithTimeout(context.Background(), 1*time.Second)
-        pingErr = suite.db.PingContext(ctxPing)
-        cancelPing()
-        if pingErr == nil {
-            break
-        }
-        if time.Now().After(deadline) {
-            break
-        }
-        time.Sleep(500 * time.Millisecond)
-    }
-    suite.Require().NoError(pingErr)
+	// Wait for the database to become ready (max 20s)
+	deadline := time.Now().Add(20 * time.Second)
+	var pingErr error
+	for {
+		// Use a short per-ping timeout
+		ctxPing, cancelPing := context.WithTimeout(context.Background(), 1*time.Second)
+		pingErr = suite.db.PingContext(ctxPing)
+		cancelPing()
+		if pingErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	suite.Require().NoError(pingErr)
 }
 
 func (suite *PostgresTestSuite) TearDownSuite() {

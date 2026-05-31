@@ -16,3 +16,10 @@ To play with these examples, follow the bellow steps:
 8. Run one migration Up() from the "migrate" binary: ``./bin/migrate up``
 9. Run migrations (3) Up() from the "migrate" binary: ``./bin/migrate up --steps=3``
 10. Run all migrations Up() from the "migrate" binary: ``./bin/migrate up --steps=all``
+11. Inspect migration state: ``./bin/migrate stats``
+
+Integration tests require both the backend tag and the integration tag:
+
+- MySQL: ``go test -tags "mysql integration" ./execution/repository``
+- MongoDB: ``go test -tags "mongo integration" ./execution/repository``
+- Postgres: ``go test -tags "postgres integration" ./execution/repository``

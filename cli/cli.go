@@ -95,11 +95,13 @@ func Bootstrap(
 		)
 	}
 
-	var up, down, forceUp, forceDown cli.Command
+	var up, down, forceUp, forceDown, forceFinish, forceRemove cli.Command
 	up = &MigrateUpCommand{handler: migrationsHandler, ctx: ctx}
 	down = &MigrateDownCommand{handler: migrationsHandler, ctx: ctx}
 	forceUp = &MigrateForceUpCommand{handler: migrationsHandler, ctx: ctx}
 	forceDown = &MigrateForceDownCommand{handler: migrationsHandler, ctx: ctx}
+	forceFinish = &MigrateForceFinishCommand{handler: migrationsHandler}
+	forceRemove = &MigrateForceRemoveCommand{handler: migrationsHandler}
 
 	if settings != nil && settings.RunMigrationsExclusively {
 		lockName := MigrationsCmdLockName
@@ -119,13 +121,23 @@ func Bootstrap(
 			settings.RunLockFilesDirPath,
 			lockName,
 		)
+		forceFinish = cli.NewLockableCommandWithLockName(
+			forceFinish,
+			settings.RunLockFilesDirPath,
+			lockName,
+		)
+		forceRemove = cli.NewLockableCommandWithLockName(
+			forceRemove,
+			settings.RunLockFilesDirPath,
+			lockName,
+		)
 	}
 
 	stats := &MigrateStatsCommand{registry: registry, repository: repository}
 	blank := &GenerateBlankMigrationCommand{migrationsDir: dirPath}
 
 	availableCommands := []cli.Command{
-		up, down, forceUp, forceDown, blank, stats,
+		up, down, forceUp, forceDown, forceFinish, forceRemove, blank, stats,
 	}
 	help := &HelpCommand{*cli.NewHelpCommand(availableCommands)}
 	availableCommands = append(availableCommands, help)
@@ -309,6 +321,18 @@ func (c *MigrateStatsCommand) Exec(stdWriter io.Writer) error {
 		_, _ = fmt.Fprintf(
 			stdWriter, "Executions count: %d\n", plan.FinishedExecutionsCount(),
 		)
+		if dirty := plan.UnfinishedExecution(); dirty.Execution != nil {
+			_, _ = fmt.Fprintf(stdWriter, "Dirty state: yes\n")
+			_, _ = fmt.Fprintf(
+				stdWriter,
+				"Unfinished migration file: %s%s%d.go\n",
+				migration.FileNamePrefix,
+				migration.FileNameSeparator,
+				dirty.Execution.Version,
+			)
+		} else {
+			_, _ = fmt.Fprintf(stdWriter, "Dirty state: no\n")
+		}
 		_, _ = fmt.Fprintf(
 			stdWriter, "Next to execute migration file: %s\n", nextMigFile,
 		)
@@ -467,5 +491,93 @@ func (c *MigrateForceDownCommand) Exec(stdWriter io.Writer) error {
 		_, _ = fmt.Fprintln(stdWriter, "No forced Down() migration executed")
 	}
 
+	return err
+}
+
+type MigrateForceFinishCommand struct {
+	rawVersion string
+	migVersion uint64
+	handler    *handler.MigrationsHandler
+}
+
+func (c *MigrateForceFinishCommand) Id() string {
+	return "force:finish"
+}
+
+func (c *MigrateForceFinishCommand) Description() string {
+	return "Marks an existing migration execution as finished without running Up()."
+}
+
+func (c *MigrateForceFinishCommand) DefineFlags(flagSet *flag.FlagSet) {
+	flagSet.StringVar(
+		&c.rawVersion,
+		"version",
+		"",
+		"Version number for force finish.\n"+
+			"Examples: migrate force:finish --version=1712953077",
+	)
+}
+
+func (c *MigrateForceFinishCommand) ValidateFlags() error {
+	version, err := getVersionFrom(c.rawVersion)
+	if err != nil {
+		return err
+	}
+	c.migVersion = version
+	return nil
+}
+
+func (c *MigrateForceFinishCommand) Exec(stdWriter io.Writer) error {
+	exec, err := c.handler.ForceFinish(c.migVersion)
+	if exec == nil {
+		_, _ = fmt.Fprintln(stdWriter, "No execution marked as finished")
+		return err
+	}
+
+	_, _ = fmt.Fprintf(stdWriter, "Marked execution %d as finished\n", exec.Version)
+	return err
+}
+
+type MigrateForceRemoveCommand struct {
+	rawVersion string
+	migVersion uint64
+	handler    *handler.MigrationsHandler
+}
+
+func (c *MigrateForceRemoveCommand) Id() string {
+	return "force:remove"
+}
+
+func (c *MigrateForceRemoveCommand) Description() string {
+	return "Removes an existing migration execution record without running Down()."
+}
+
+func (c *MigrateForceRemoveCommand) DefineFlags(flagSet *flag.FlagSet) {
+	flagSet.StringVar(
+		&c.rawVersion,
+		"version",
+		"",
+		"Version number for force remove.\n"+
+			"Examples: migrate force:remove --version=1712953077",
+	)
+}
+
+func (c *MigrateForceRemoveCommand) ValidateFlags() error {
+	version, err := getVersionFrom(c.rawVersion)
+	if err != nil {
+		return err
+	}
+	c.migVersion = version
+	return nil
+}
+
+func (c *MigrateForceRemoveCommand) Exec(stdWriter io.Writer) error {
+	exec, err := c.handler.ForceRemove(c.migVersion)
+	if exec == nil {
+		_, _ = fmt.Fprintln(stdWriter, "No execution removed")
+		return err
+	}
+
+	_, _ = fmt.Fprintf(stdWriter, "Removed execution %d\n", exec.Version)
 	return err
 }

@@ -3,7 +3,7 @@ package migrations
 import (
 	"context"
 	"github.com/golibry/go-migrations/migration"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 func init() {

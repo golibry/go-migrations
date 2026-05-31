@@ -108,6 +108,12 @@ type Repository interface {
 	FindOne(version uint64) (*MigrationExecution, error)
 }
 
+// RepositoryLocker can be implemented by repositories that support a backend-level lock.
+// The returned function must release the acquired lock.
+type RepositoryLocker interface {
+	Lock() (func() error, error)
+}
+
 // InMemoryRepository is an in-memory implementation of the Repository interface.
 // It's primarily intended for use in unit tests, as it doesn't persist data between application restarts.
 // Each of the error fields can be set to force the corresponding method to return that error,
@@ -150,7 +156,7 @@ func (repo *InMemoryRepository) Save(execution MigrationExecution) error {
 	if repo.SaveErr != nil {
 		return repo.SaveErr
 	}
-	
+
 	for i, e := range repo.PersistedExecutions {
 		if e.Version == execution.Version {
 			repo.PersistedExecutions[i] = execution

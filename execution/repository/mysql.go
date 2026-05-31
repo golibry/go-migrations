@@ -6,6 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/golibry/go-migrations/execution"
@@ -15,6 +17,7 @@ import (
 type MysqlHandler struct {
 	db        *sql.DB
 	tableName string
+	lockName  string
 	ctx       context.Context
 }
 
@@ -36,7 +39,23 @@ func NewMysqlHandler(
 		}
 	}
 
-	return &MysqlHandler{db, tableName, ctx}, nil
+	quotedTableName, err := quoteMySQLTableName(tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	return &MysqlHandler{
+		db:        db,
+		tableName: quotedTableName,
+		lockName:  "go-migrations:" + tableName,
+		ctx:       ctx,
+	}, nil
+}
+
+func quoteMySQLTableName(tableName string) (string, error) {
+	return quoteSQLTableName(tableName, func(identifier string) string {
+		return "`" + strings.ReplaceAll(identifier, "`", "``") + "`"
+	})
 }
 
 func (h *MysqlHandler) Context() context.Context {
@@ -46,7 +65,7 @@ func (h *MysqlHandler) Context() context.Context {
 func (h *MysqlHandler) Init() error {
 	_, err := h.db.ExecContext(
 		h.ctx,
-		"CREATE TABLE IF NOT EXISTS `"+h.tableName+"` ("+
+		"CREATE TABLE IF NOT EXISTS "+h.tableName+" ("+
 			"`version` BIGINT UNSIGNED NOT NULL,"+
 			"`executed_at_ms` BIGINT UNSIGNED NOT NULL,"+
 			"`finished_at_ms` BIGINT UNSIGNED NOT NULL,"+
@@ -59,7 +78,7 @@ func (h *MysqlHandler) Init() error {
 func (h *MysqlHandler) LoadExecutions() (executions []execution.MigrationExecution, err error) {
 	rows, err := h.db.QueryContext(
 		h.ctx,
-		"SELECT version, executed_at_ms, finished_at_ms FROM `"+h.tableName+"`",
+		"SELECT version, executed_at_ms, finished_at_ms FROM "+h.tableName,
 	)
 
 	if err != nil {
@@ -87,7 +106,7 @@ func (h *MysqlHandler) LoadExecutions() (executions []execution.MigrationExecuti
 func (h *MysqlHandler) Save(execution execution.MigrationExecution) error {
 	_, err := h.db.ExecContext(
 		h.ctx,
-		"INSERT INTO `"+h.tableName+"` VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE "+
+		"INSERT INTO "+h.tableName+" VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE "+
 			" `executed_at_ms` = VALUES(`executed_at_ms`), "+
 			" `finished_at_ms` = VALUES(`finished_at_ms`)",
 		execution.Version, execution.ExecutedAtMs, execution.FinishedAtMs,
@@ -98,7 +117,7 @@ func (h *MysqlHandler) Save(execution execution.MigrationExecution) error {
 func (h *MysqlHandler) Remove(execution execution.MigrationExecution) error {
 	_, err := h.db.ExecContext(
 		h.ctx,
-		"DELETE FROM `"+h.tableName+"` WHERE `version` = ?",
+		"DELETE FROM "+h.tableName+" WHERE `version` = ?",
 		execution.Version,
 	)
 	return err
@@ -107,7 +126,7 @@ func (h *MysqlHandler) Remove(execution execution.MigrationExecution) error {
 func (h *MysqlHandler) FindOne(version uint64) (*execution.MigrationExecution, error) {
 	row := h.db.QueryRowContext(
 		h.ctx,
-		"SELECT version, executed_at_ms, finished_at_ms FROM `"+h.tableName+"` WHERE `version` = ?",
+		"SELECT version, executed_at_ms, finished_at_ms FROM "+h.tableName+" WHERE `version` = ?",
 		version,
 	)
 
@@ -125,4 +144,28 @@ func (h *MysqlHandler) FindOne(version uint64) (*execution.MigrationExecution, e
 	}
 
 	return &exec, row.Err()
+}
+
+func (h *MysqlHandler) Lock() (func() error, error) {
+	conn, err := h.db.Conn(h.ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var acquired int
+	if err = conn.QueryRowContext(h.ctx, "SELECT GET_LOCK(?, ?)", h.lockName, 30).Scan(&acquired); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if acquired != 1 {
+		_ = conn.Close()
+		return nil, fmt.Errorf("failed to acquire MySQL advisory lock %q", h.lockName)
+	}
+
+	return func() error {
+		var released int
+		releaseErr := conn.QueryRowContext(h.ctx, "SELECT RELEASE_LOCK(?)", h.lockName).Scan(&released)
+		closeErr := conn.Close()
+		return errors.Join(releaseErr, closeErr)
+	}, nil
 }

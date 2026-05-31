@@ -69,6 +69,18 @@ func (suite *CliTestSuite) TestItCanRunTheGivenCommand() {
 			[]string{"force:down", "--version=123"},
 			"No forced Down() migration executed",
 		},
+		"force finish explicit": {
+			[]string{"force:finish", "--version=123"},
+			"No execution marked as finished",
+		},
+		"force remove explicit": {
+			[]string{"force:remove", "--version=123"},
+			"No execution removed",
+		},
+		"stats explicit": {
+			[]string{"stats"},
+			"Dirty state: no",
+		},
 	}
 
 	for name, scenario := range scenarios {

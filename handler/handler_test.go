@@ -433,6 +433,16 @@ func (f *FakeUpMigration) Version() uint64 {
 	return f.DummyMigration.Version()
 }
 
+type FakeFailingUpMigration struct {
+	FakeUpMigration
+	err error
+}
+
+func (f *FakeFailingUpMigration) Up(ctx context.Context, db any) error {
+	f.upRan = true
+	return f.err
+}
+
 func (suite *HandlerTestSuite) TestItCanHandleFailureWhenMigratingUp() {
 	scenarios := map[string]struct {
 		errMsg                  string
@@ -441,7 +451,7 @@ func (suite *HandlerTestSuite) TestItCanHandleFailureWhenMigratingUp() {
 		expectedToHaveExecution bool
 	}{
 		"missing execution plan":    {"init failed", false, false, false},
-		"failure to save execution": {"save failed", true, true, true},
+		"failure to save execution": {"save failed", false, false, false},
 	}
 
 	for scenarioName, scenario := range scenarios {
@@ -621,6 +631,66 @@ func (suite *HandlerTestSuite) TestItCanMigrateUp() {
 			suite.Assert().True(saved.Finished(), "failed scenario: %s", name)
 		}
 	}
+}
+
+func (suite *HandlerTestSuite) TestItSavesUnfinishedExecutionBeforeRunningMigrationUp() {
+	expectedErr := errors.New("up failed")
+	registry := migration.NewGenericRegistry()
+	registeredMigration := &FakeFailingUpMigration{
+		FakeUpMigration: FakeUpMigration{DummyMigration: *migration.NewDummyMigration(1)},
+		err:             expectedErr,
+	}
+	_ = registry.Register(registeredMigration)
+
+	repo := &execution.InMemoryRepository{}
+	handler, _ := NewHandler(registry, repo, nil)
+	numOfRuns, _ := NewNumOfRuns("1")
+
+	handledMigrations, err := handler.MigrateUp(context.Background(), numOfRuns)
+
+	suite.Assert().ErrorIs(err, expectedErr)
+	suite.Assert().Len(handledMigrations, 1)
+	suite.Assert().True(registeredMigration.upRan)
+	suite.Assert().Len(repo.PersistedExecutions, 1)
+	suite.Assert().Equal(uint64(1), repo.PersistedExecutions[0].Version)
+	suite.Assert().False(repo.PersistedExecutions[0].Finished())
+}
+
+func (suite *HandlerTestSuite) TestItCanDetectDirtyExecutionPlan() {
+	registry := migration.NewGenericRegistry()
+	_ = registry.Register(migration.NewDummyMigration(1))
+	repo := &execution.InMemoryRepository{}
+	repo.SaveAll([]execution.MigrationExecution{
+		{Version: 1, ExecutedAtMs: 2, FinishedAtMs: 0},
+	})
+
+	plan, err := NewPlan(registry, repo)
+
+	suite.Assert().NoError(err)
+	suite.Assert().True(plan.Dirty())
+	suite.Assert().Equal(uint64(1), plan.UnfinishedExecution().Execution.Version)
+}
+
+func (suite *HandlerTestSuite) TestItCanForceFinishAndForceRemoveExecutions() {
+	registry := migration.NewGenericRegistry()
+	_ = registry.Register(migration.NewDummyMigration(1))
+	repo := &execution.InMemoryRepository{}
+	repo.SaveAll([]execution.MigrationExecution{
+		{Version: 1, ExecutedAtMs: 2, FinishedAtMs: 0},
+	})
+	handler, _ := NewHandler(registry, repo, nil)
+
+	finishedExec, err := handler.ForceFinish(1)
+
+	suite.Assert().NoError(err)
+	suite.Assert().NotNil(finishedExec)
+	suite.Assert().True(finishedExec.Finished())
+
+	removedExec, err := handler.ForceRemove(1)
+
+	suite.Assert().NoError(err)
+	suite.Assert().NotNil(removedExec)
+	suite.Assert().Len(repo.PersistedExecutions, 0)
 }
 
 func (suite *HandlerTestSuite) TestItCanMigrateDown() {

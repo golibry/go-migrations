@@ -21,6 +21,12 @@ Note: For step-by-step usage, commands, and full working demos, see the _example
 - MongoDB: build tag mongo
 - PostgreSQL: build tag postgres
 
+Backend integration tests require the matching backend tag and the `integration` tag, for example:
+
+- MySQL/MariaDB: `go test -tags "mysql integration" ./execution/repository`
+- MongoDB: `go test -tags "mongo integration" ./execution/repository`
+- PostgreSQL: `go test -tags "postgres integration" ./execution/repository`
+
 Refer to _examples/README.md for how to build the CLI with the appropriate tags and how to run against each backend.
 
 ## How it works (high level)
@@ -30,11 +36,15 @@ Refer to _examples/README.md for how to build the CLI with the appropriate tags 
 - Automatic registration: migrations can self-register using `init()` and `migration.Register()`, making them easy to manage
 - The registry (e.g., `NewAutoDirMigrationsRegistry`) validates that all migration files are correctly registered
 - An execution repository records applied versions in your storage backend
+- The handler persists a started execution before running `Up()`, so crashes during migration work leave a detectable unfinished execution
+- Supported database repositories acquire a backend-level lock while running mutation commands
 - The CLI boots with your registry, repository, migrations directory, and optional process-level locking
 
 ## CLI overview
 
-Available commands include: help, up, down, blank, stats, force:up, force:down.
+Available commands include: help, up, down, blank, stats, force:up, force:down, force:finish, force:remove.
+
+`stats` reports dirty state when the latest execution is unfinished. `force:finish` and `force:remove` are repair commands for cases where operators have manually verified the database state after a failed or interrupted migration.
 
 For build instructions and concrete usage examples of each command, see the _examples folder.
 
@@ -50,6 +60,6 @@ Start with _examples/README.md for instructions.
 
 ## Recommendations & hints
 
-- No DB-level locking is performed by the repository layer. In distributed setups, prefer controlling concurrency at the process or orchestration level (e.g., using the CLI's exclusive run settings).
+- Supported database repositories acquire backend-level locks for mutation commands. In distributed setups, this can be combined with the CLI's process-level exclusive run settings.
 - Write migrations to be idempotent when possible. Use transactions to ensure atomicity and prevent partial migration application.
 - Database handles can be shared between your application and the migration executions.

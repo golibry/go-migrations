@@ -10,8 +10,8 @@ import (
 	"github.com/golibry/go-migrations/cli"
 	"github.com/golibry/go-migrations/execution/repository"
 	"github.com/golibry/go-migrations/migration"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func main() {
@@ -37,7 +37,7 @@ func main() {
 
 	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
 	opts := options.Client().ApplyURI(dbDsn).SetServerAPIOptions(serverAPI)
-	client, err := mongo.Connect(ctx, opts)
+	client, err := mongo.Connect(opts)
 	if err != nil {
 		panic(fmt.Errorf("failed to connect to migrations db: %w", err))
 	}

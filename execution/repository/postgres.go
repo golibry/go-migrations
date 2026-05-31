@@ -6,7 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
+	"strings"
 
 	"github.com/golibry/go-migrations/execution"
 	_ "github.com/lib/pq"
@@ -16,6 +16,7 @@ import (
 type PostgresHandler struct {
 	db        *sql.DB
 	tableName string
+	lockName  string
 	ctx       context.Context
 }
 
@@ -37,7 +38,23 @@ func NewPostgresHandler(
 		}
 	}
 
-	return &PostgresHandler{db, tableName, ctx}, nil
+	quotedTableName, err := quotePostgresTableName(tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PostgresHandler{
+		db:        db,
+		tableName: quotedTableName,
+		lockName:  "go-migrations:" + tableName,
+		ctx:       ctx,
+	}, nil
+}
+
+func quotePostgresTableName(tableName string) (string, error) {
+	return quoteSQLTableName(tableName, func(identifier string) string {
+		return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+	})
 }
 
 func (h *PostgresHandler) Context() context.Context {
@@ -45,24 +62,21 @@ func (h *PostgresHandler) Context() context.Context {
 }
 
 func (h *PostgresHandler) Init() error {
-	query := fmt.Sprintf(
-		`
-		CREATE TABLE IF NOT EXISTS "%s" (
+	query := `
+		CREATE TABLE IF NOT EXISTS ` + h.tableName + ` (
 			version BIGINT NOT NULL,
 			executed_at_ms BIGINT NOT NULL,
 			finished_at_ms BIGINT NOT NULL,
 			PRIMARY KEY (version)
 		)
-		`,
-		h.tableName,
-	)
+		`
 
 	_, err := h.db.ExecContext(h.ctx, query)
 	return err
 }
 
 func (h *PostgresHandler) LoadExecutions() (executions []execution.MigrationExecution, err error) {
-	query := fmt.Sprintf(`SELECT * FROM "%s"`, h.tableName)
+	query := `SELECT version, executed_at_ms, finished_at_ms FROM ` + h.tableName
 	rows, err := h.db.QueryContext(h.ctx, query)
 
 	if err != nil {
@@ -89,16 +103,13 @@ func (h *PostgresHandler) LoadExecutions() (executions []execution.MigrationExec
 
 func (h *PostgresHandler) Save(execution execution.MigrationExecution) error {
 	// PostgresSQL uses ON CONFLICT for upsert operations
-	query := fmt.Sprintf(
-		`
-		INSERT INTO "%s" (version, executed_at_ms, finished_at_ms) 
+	query := `
+		INSERT INTO ` + h.tableName + ` (version, executed_at_ms, finished_at_ms) 
 		VALUES ($1, $2, $3) 
 		ON CONFLICT (version) DO UPDATE SET 
 		executed_at_ms = $2, 
 		finished_at_ms = $3
-		`,
-		h.tableName,
-	)
+		`
 
 	_, err := h.db.ExecContext(
 		h.ctx,
@@ -109,16 +120,13 @@ func (h *PostgresHandler) Save(execution execution.MigrationExecution) error {
 }
 
 func (h *PostgresHandler) Remove(execution execution.MigrationExecution) error {
-	query := fmt.Sprintf(`DELETE FROM "%s" WHERE version = $1`, h.tableName)
+	query := `DELETE FROM ` + h.tableName + ` WHERE version = $1`
 	_, err := h.db.ExecContext(h.ctx, query, execution.Version)
 	return err
 }
 
 func (h *PostgresHandler) FindOne(version uint64) (*execution.MigrationExecution, error) {
-	query := fmt.Sprintf(
-		`SELECT version, executed_at_ms, finished_at_ms FROM "%s" WHERE version = $1`,
-		h.tableName,
-	)
+	query := `SELECT version, executed_at_ms, finished_at_ms FROM ` + h.tableName + ` WHERE version = $1`
 	row := h.db.QueryRowContext(h.ctx, query, version)
 
 	if row == nil {
@@ -135,4 +143,23 @@ func (h *PostgresHandler) FindOne(version uint64) (*execution.MigrationExecution
 	}
 
 	return &exec, row.Err()
+}
+
+func (h *PostgresHandler) Lock() (func() error, error) {
+	conn, err := h.db.Conn(h.ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	lockID := advisoryLockID(h.lockName)
+	if _, err = conn.ExecContext(h.ctx, "SELECT pg_advisory_lock($1)", lockID); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	return func() error {
+		_, releaseErr := conn.ExecContext(h.ctx, "SELECT pg_advisory_unlock($1)", lockID)
+		closeErr := conn.Close()
+		return errors.Join(releaseErr, closeErr)
+	}, nil
 }
