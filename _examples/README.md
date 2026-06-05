@@ -1,6 +1,6 @@
 ## Examples  
   
-Each folder integrates with a storage type (repository) the library supports (mysql, mongo, postgres).  
+Each folder integrates with a container-backed storage type (repository) the library supports (mysql, mongo, postgres). SQLite is supported by the library too, but does not need a Docker example.  
 To play with these examples, follow the bellow steps:  
   
 1. Change directory to project root
@@ -23,3 +23,7 @@ Integration tests require both the backend tag and the integration tag:
 - MySQL: ``go test -tags "mysql integration" ./execution/repository``
 - MongoDB: ``go test -tags "mongo integration" ./execution/repository``
 - Postgres: ``go test -tags "postgres integration" ./execution/repository``
+
+SQLite tests do not require Docker:
+
+- SQLite: ``go test -tags sqlite ./execution/repository``

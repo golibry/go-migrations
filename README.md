@@ -20,12 +20,17 @@ Note: For step-by-step usage, commands, and full working demos, see the _example
 - MySQL/MariaDB: build tag mysql
 - MongoDB: build tag mongo
 - PostgreSQL: build tag postgres
+- SQLite: build tag sqlite
 
 Backend integration tests require the matching backend tag and the `integration` tag, for example:
 
 - MySQL/MariaDB: `go test -tags "mysql integration" ./execution/repository`
 - MongoDB: `go test -tags "mongo integration" ./execution/repository`
 - PostgreSQL: `go test -tags "postgres integration" ./execution/repository`
+
+SQLite repository tests do not require Docker:
+
+- SQLite: `go test -tags sqlite ./execution/repository`
 
 Refer to _examples/README.md for how to build the CLI with the appropriate tags and how to run against each backend.
 
@@ -50,7 +55,7 @@ For build instructions and concrete usage examples of each command, see the _exa
 
 ## Examples and getting started
 
-Complete, runnable examples are provided under _examples for all supported backends (mysql, mongo, postgres). The examples include:
+Complete, runnable examples are provided under _examples for the container-backed storage integrations (mysql, mongo, postgres). The examples include:
 
 - Building the "migrate" binary with build tags
 - Configuration via environment variables
